@@ -104,7 +104,6 @@ def process_data(root, descriptors, molecules):
     plot_energies_all(root, descriptors, molecules, loaded_data)
     # plot any selected groups of figures
     
-
 def generate_new_qm_jobs(root, mols, descrips):
     #############################
     def ifzmat_string(data, values):

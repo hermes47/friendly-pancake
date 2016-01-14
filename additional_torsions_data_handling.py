@@ -16,15 +16,15 @@ def extract_energies(root, descriptors, molecules, angles_to_measure):
             energies, angles = {}, {}
             shifts = angles_to_measure[molecules.index(m)]
             formatting = dict(root=root,
-                              descript=b,
+                              basis=b,
                               mol=m)
             for a in range(0,360,5):
                 if a == 180:
                     a = 179
                 formatting['angle'] = a
-                if not os.path.isfile('{root}/{descript}/{mol}/{mol}.{angle:03}.log'.format(**formatting)):
+                if not os.path.isfile('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting)):
                     continue
-                with open('{root}/{descript}/{mol}/{mol}.{angle:03}.log'.format(**formatting),'r') as fh:
+                with open('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting),'r') as fh:
                     file = fh.readlines()
                 conf = extract_conformation(file)
                 if conf is None:
@@ -33,7 +33,7 @@ def extract_energies(root, descriptors, molecules, angles_to_measure):
                 angles[a] = dihedral_angle(conf[shifts[0]]['vec'],conf[shifts[1]]['vec'],
                                            conf[shifts[2]]['vec'],conf[shifts[3]]['vec'], scale='deg')
             if not energies:
-                print('Nothing extracted for {descript}:{mol}'.format(**formatting))
+                print('Nothing extracted for {basis}:{mol}'.format(**formatting))
                 continue
             try:
                 z_energy = energies[0]
@@ -42,26 +42,26 @@ def extract_energies(root, descriptors, molecules, angles_to_measure):
             for i in energies:
                 energies[i] -= z_energy
             
-            with open('{root}/{descript}/{mol}/energies.txt'.format(**formatting),'w') as fh:
+            with open('{root}/{basis}/{mol}/energies.txt'.format(**formatting),'w') as fh:
                 yaml.dump([energies,angles],fh)
 
-def plot_energies_individual(root, molecules, descriptors, loaded_data):
+def plot_energies_individual(root, molecules, basis_sets, loaded_data):
     for m in molecules:
         if m not in loaded_data:
             continue
-        for d in descriptors:
+        for d in basis_sets:
             if d not in loaded_data[m]:
                 continue
             data = [{'x':loaded_data[m][d][1],
                      'y':loaded_data[m][d][0],
                      'marker':'ko'}]
-            forms = dict(root=root, mol=m, descript=d)
-            save_path = '{root}/Figures/{mol}/{descript}.png'.format(**forms)
+            forms = dict(root=root, mol=m, basis=d)
+            save_path = '{root}/Figures/{mol}/{basis}.png'.format(**forms)
             plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
                   x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
-                  title='Dihedral profile for {mol} under {descript}'.format(**forms))
+                  title='Dihedral profile for {mol} under {basis}'.format(**forms))
                 
-def plot_energies_all(root, descriptors, molecules, loaded_data, data_set='Combined'):
+def plot_energies_all(root, basis_sets, molecules, loaded_data, data_set='Combined'):
     for m in molecules:
         if m not in loaded_data:
             continue
@@ -69,7 +69,7 @@ def plot_energies_all(root, descriptors, molecules, loaded_data, data_set='Combi
         forms = dict(root=root, mol=m, name=data_set)
         save_path = '{root}/Figures/{mol}/{name}.png'.format(**forms)
         
-        for d in descriptors:
+        for d in basis_sets:
             if d not in loaded_data[m]:
                 continue
             point_data = {'x':loaded_data[m][d][1],
@@ -81,27 +81,27 @@ def plot_energies_all(root, descriptors, molecules, loaded_data, data_set='Combi
                   x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
                   title='Dihedral profile for {mol} under all setups'.format(**forms))
         
-def process_data(root, descriptors, molecules):
+def process_data(root, basis_sets, molecules):
     # load all data
     loaded_data = {}
     for m in molecules:
         formatting = dict(root=root, mol=m)
         if not os.path.isdir('{root}/Figures/{mol}/'.format(**formatting)):
             os.makedirs('{root}/Figures/{mol}/'.format(**formatting))
-        for d in descriptors:
-            formatting['descript'] = d
-            if not os.path.isfile('{root}/{descript}/{mol}/energies.txt'.format(**formatting)):
+        for d in basis_sets:
+            formatting['basis'] = d
+            if not os.path.isfile('{root}/{basis}/{mol}/energies.txt'.format(**formatting)):
                 continue
-            with open('{root}/{descript}/{mol}/energies.txt'.format(**formatting), 'r') as fh:
+            with open('{root}/{basis}/{mol}/energies.txt'.format(**formatting), 'r') as fh:
                 energies, angles = yaml.load(fh)
             if m in loaded_data:
                 loaded_data[m][d] = energies, angles
             else:
                 loaded_data[m] = {d:(energies,angles)}
     # plot individual figures
-    plot_energies_individual(root, molecules, descriptors, loaded_data)
+    plot_energies_individual(root, molecules, basis_sets, loaded_data)
     # plot all setups on one figure
-    plot_energies_all(root, descriptors, molecules, loaded_data)
+    plot_energies_all(root, basis_sets, molecules, loaded_data)
     # plot any selected groups of figures
     
 def generate_new_qm_jobs(root, mols, descrips):
@@ -262,7 +262,7 @@ def main():
                     ]
     molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1']
     measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
-    #extract_energies(root, descriptors, molecules, measure_angles)
+    extract_energies(root, descriptors, molecules, measure_angles)
     process_data(root, descriptors, molecules)
 
 if __name__ == '__main__':

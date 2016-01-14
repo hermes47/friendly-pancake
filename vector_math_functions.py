@@ -30,7 +30,9 @@ def dihedral_angle(a, b, c, d, period=[0,2*np.pi], scale='rad'):
         phi -= 2 * np.pi
     if scale == 'deg':
         phi *= 180/np.pi
-    return phi
+        if int(round(phi,0)) == 360:
+            phi -= 360
+    return float(phi)
 
 def main():
     pass

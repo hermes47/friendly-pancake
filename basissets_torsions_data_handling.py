@@ -110,7 +110,7 @@ def main():
     sets = ['631Gd','631+Gd', '6311+G2dp', '6311++G2d2p', '6311++G3df3p']
     mols = ['AMINO0', 'CHLORO0', 'HYDRO0', 'METH0', 'THIO0']
     angles_to_measure = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
-    extract_energies(sets, mols, root, angles_to_measure)
+    #extract_energies(sets, mols, root, angles_to_measure)
     process_data(root, sets, mols)
     
 

@@ -274,7 +274,7 @@ def main():
     molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1', 'AMINO-1', 'CHLORO-1']
     measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
     #extract_energies(root, descriptors, molecules, measure_angles)
-    extract_energies(root, ['Original'], ['AMINO-1'], [[2,1,8,9]])
+    #extract_energies(root, ['Original'], ['AMINO-1'], [[2,1,8,9]])
     #process_data(root, descriptors, molecules)
     process_data(root, ['Original'], ['AMINO-1'])
     #generate_new_qm_jobs(root, ['AMINO-1'], ['Original'])

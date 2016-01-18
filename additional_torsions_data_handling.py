@@ -211,6 +211,17 @@ def generate_new_qm_jobs(root, mols, descrips):
                              'psiC_60':[(10,9,8,1,-12.12)],
                              'psiH_60':[(17,9,8,1,107.88),(18,9,8,1,-132.12)],
                              },
+                 'AMINO-1':  {'rigid':[(2,1,8,9, None)],
+                             'func':[(16,15,14,8,-54.8),(17,15,14,8,59.97)],
+                             'thetaC':[(15,14,8,9,-65.08)],
+                             'thetaH':[(20,14,8,9,173.09),(21,14,8,9,57.38)],
+                             'psiC':[(10,9,8,1,-71.06)],
+                             'psiH':[(18,9,8,1,48.94),(19,9,8,1,168.94)],
+                             'psiC_30':[(10,9,8,1,-41.06)],
+                             'psiH_30':[(18,9,8,1,78.94),(19,9,8,1,-161.06)],
+                             'psiC_60':[(10,9,8,1,-11.06)],
+                             'psiH_60':[(18,9,8,1,108.94),(19,9,8,1,-131.06)],
+                             },
                  }
     
     descriptors = {'Original':          ['rigid'],
@@ -260,10 +271,13 @@ def main():
                    '30PsiOriginal', '60PsiOriginal',
                    #'AllFixed', 'AllHeavyFixed',
                     ]
-    molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1']
-    measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
-    extract_energies(root, descriptors, molecules, measure_angles)
-    process_data(root, descriptors, molecules)
+    molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1', 'AMINO-1', 'CHLORO-1']
+    measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
+    #extract_energies(root, descriptors, molecules, measure_angles)
+    extract_energies(root, ['Original'], ['AMINO-1'], [[2,1,8,9]])
+    #process_data(root, descriptors, molecules)
+    process_data(root, ['Original'], ['AMINO-1'])
+    #generate_new_qm_jobs(root, ['AMINO-1'], ['Original'])
 
 if __name__ == '__main__':
     main()

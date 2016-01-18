@@ -91,6 +91,9 @@ def plot_apl(electrostics, charges, dispersions, root, mol, loaded_data):
                   title='Area per lipid'.format(**forms))
 
 def plot_vpl(electrostics, charges, dispersions, root, mol, loaded_data):
+    vol_per_water = dict(PME=0.0318776,
+                         TR_RF=0.0318776,
+                         SR_RF=0.0318776)
     pass
 
 def plot_potential(electrostics, charges, dispersions, root, mol, loaded_data):

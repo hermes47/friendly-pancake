@@ -54,7 +54,7 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data):
                 continue
             data = [{'x':loaded_data[m][d][1],
                      'y':loaded_data[m][d][0],
-                     'marker':'ko'}]
+                     'marker':'.'}]
             forms = dict(root=root, mol=m, basis=d)
             save_path = '{root}/Figures/{mol}/{basis}.png'.format(**forms)
             plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
@@ -212,15 +212,14 @@ def generate_new_qm_jobs(root, mols, descrips):
                              'psiH_60':[(17,9,8,1,107.88),(18,9,8,1,-132.12)],
                              },
                  'AMINO-1':  {'rigid':[(2,1,8,9, None)],
-                             'func':[(16,15,14,8,-54.8),(17,15,14,8,59.97)],
-                             'thetaC':[(15,14,8,9,-65.08)],
-                             'thetaH':[(20,14,8,9,173.09),(21,14,8,9,57.38)],
-                             'psiC':[(10,9,8,1,-71.06)],
-                             'psiH':[(18,9,8,1,48.94),(19,9,8,1,168.94)],
-                             'psiC_30':[(10,9,8,1,-41.06)],
-                             'psiH_30':[(18,9,8,1,78.94),(19,9,8,1,-161.06)],
-                             'psiC_60':[(10,9,8,1,-11.06)],
-                             'psiH_60':[(18,9,8,1,108.94),(19,9,8,1,-131.06)],
+                             },
+                 'CHLORO-1':  {'rigid':[(2,1,8,9, None)],
+                             },
+                 'HYDRO-1':  {'rigid':[(2,1,8,9, None)],
+                             },
+                 'METH-1':  {'rigid':[(2,1,8,9, None)],
+                             },
+                 'THIO-1':  {'rigid':[(2,1,8,9, None)],
                              },
                  }
     
@@ -271,13 +270,13 @@ def main():
                    '30PsiOriginal', '60PsiOriginal',
                    #'AllFixed', 'AllHeavyFixed',
                     ]
-    molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1', 'AMINO-1', 'CHLORO-1']
+    molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1', 'AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1']
     measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
     #extract_energies(root, descriptors, molecules, measure_angles)
-    #extract_energies(root, ['Original'], ['AMINO-1'], [[2,1,8,9]])
+    extract_energies(root, ['Original'], ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1'], [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]])
     #process_data(root, descriptors, molecules)
-    process_data(root, ['Original'], ['AMINO-1'])
-    #generate_new_qm_jobs(root, ['AMINO-1'], ['Original'])
+    process_data(root, ['Original'], ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1'])
+    #generate_new_qm_jobs(root, ['METH-1'], ['Original'])
 
 if __name__ == '__main__':
     main()

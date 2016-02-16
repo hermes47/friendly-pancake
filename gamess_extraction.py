@@ -17,7 +17,7 @@ def extract_energy(loaded_file, scale=2625.5):
         energy = float(ene_line.split()[3])*scale
     return energy
 
-def extract_conformation(loaded_file, scale=1):
+def extract_conformation(loaded_file, scale=1, key='int'): # or key='name'
     """
     Extracts the minimised conformation from a GAMESS optimisation log file
     """
@@ -36,13 +36,22 @@ def extract_conformation(loaded_file, scale=1):
         if not line_data:
             break
         count += 1
-        conf[count] = {'atom':  line_data[0],
-                       'charge':float(line_data[1]),
-                       'x':     float(line_data[2])*scale,
-                       'y':     float(line_data[3])*scale,
-                       'z':     float(line_data[4])*scale,
-                       'vec':   [float(line_data[2])*scale,float(line_data[3])*scale,float(line_data[4])*scale]
-                       }
+        if key == 'int' or key not in ['int','name']:
+            conf[count] = {'atom':  line_data[0],
+                           'charge':float(line_data[1]),
+                           'x':     float(line_data[2])*scale,
+                           'y':     float(line_data[3])*scale,
+                           'z':     float(line_data[4])*scale,
+                           'vec':   [float(line_data[2])*scale,float(line_data[3])*scale,float(line_data[4])*scale]
+                           }
+        elif key == 'name':
+            conf[line_data[0]] = {'atom':  count,
+                                  'charge':float(line_data[1]),
+                                  'x':     float(line_data[2])*scale,
+                                  'y':     float(line_data[3])*scale,
+                                  'z':     float(line_data[4])*scale,
+                                  'vec':   [float(line_data[2])*scale,float(line_data[3])*scale,float(line_data[4])*scale]
+                                  }
     return conf
             
             

@@ -6,11 +6,14 @@ Created on 14/01/2016
 import os
 import yaml
 
-from vector_math_functions import dihedral_angle
+from vector_math_functions import dihedral_angle, two_pass_lls, one_pass_lls, energy_at_x, prune_data
 from gamess_extraction import extract_conformation, extract_energy
+from gromos_extraction import extract_conf, extract_ene
 from plotting import plot_scatters
+from mrsuper.lib import genlib, inlib, outlib, storage
+from numpy import array
 
-def extract_energies(root, descriptors, molecules, angles_to_measure):
+def extract_energies_qm(root, descriptors, molecules, angles_to_measure):
     for b in descriptors:
         for m in molecules:
             energies, angles = {}, {}
@@ -19,13 +22,19 @@ def extract_energies(root, descriptors, molecules, angles_to_measure):
                               basis=b,
                               mol=m)
             for a in range(0,360,5):
+                formatting['angle2'] = a
                 if a == 180:
                     a = 179
                 formatting['angle'] = a
-                if not os.path.isfile('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting)):
+                if (not os.path.isfile('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting)) 
+                    and not os.path.isfile('{root}/{basis}/{mol}/{mol}.{angle2:03}.log'.format(**formatting))):
                     continue
-                with open('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting),'r') as fh:
-                    file = fh.readlines()
+                try:
+                    with open('{root}/{basis}/{mol}/{mol}.{angle:03}.log'.format(**formatting),'r') as fh:
+                        file = fh.readlines()
+                except FileNotFoundError:
+                    with open('{root}/{basis}/{mol}/{mol}.{angle2:03}.log'.format(**formatting),'r') as fh:
+                        file = fh.readlines()
                 conf = extract_conformation(file)
                 if conf is None:
                     continue                
@@ -42,67 +51,174 @@ def extract_energies(root, descriptors, molecules, angles_to_measure):
             for i in energies:
                 energies[i] -= z_energy
             
-            with open('{root}/{basis}/{mol}/energies.txt'.format(**formatting),'w') as fh:
+            with open('{root}/{basis}/{mol}/energies.qm.txt'.format(**formatting),'w') as fh:
                 yaml.dump([energies,angles],fh)
-
-def plot_energies_individual(root, molecules, basis_sets, loaded_data):
-    for m in molecules:
-        if m not in loaded_data:
-            continue
-        for d in basis_sets:
-            if d not in loaded_data[m]:
-                continue
-            data = [{'x':loaded_data[m][d][1],
-                     'y':loaded_data[m][d][0],
-                     'marker':'.'}]
-            forms = dict(root=root, mol=m, basis=d)
-            save_path = '{root}/Figures/{mol}/{basis}.png'.format(**forms)
-            plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
-                  x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
-                  title='Dihedral profile for {mol} under {basis}'.format(**forms))
+            with open('{root}/{basis}/{mol}/fitted_curve.qm.txt'.format(**formatting),'w') as fh:
+                yaml.dump(two_pass_lls(energies, angles, 3, phase=False), fh)
+            with open('{root}/{basis}/{mol}/phased_fitted_curve.qm.txt'.format(**formatting),'w') as fh:
+                yaml.dump(two_pass_lls(energies, angles, 3, phase=[0,90]), fh)
+            with open('{root}/{basis}/{mol}/onepass_fitted_curve.qm.txt'.format(**formatting),'w') as fh:
+                yaml.dump(one_pass_lls(energies, angles, phase=False), fh)
+            with open('{root}/{basis}/{mol}/onepass_phased_fitted_curve.qm.txt'.format(**formatting),'w') as fh:
+                yaml.dump(one_pass_lls(energies, angles, phase=[0,90]), fh)
                 
-def plot_energies_all(root, basis_sets, molecules, loaded_data, data_set='Combined'):
+def extract_energies_md(root, descriptors, molecules, angles_to_measure):
+    for t in ('aa','ua'):
+        for d in descriptors:
+            for m in molecules:
+                energies, angles = {}, {}
+                shifts = angles_to_measure[molecules.index(m)][t]
+                formatting = dict(root=root,
+                                  des=d,
+                                  mol=m,
+                                  type=t,
+                                  c=1)
+                for a in range(0,360,5):
+                    formatting['angle2'] = a
+                    if a == 180:
+                        a = 179
+                    formatting['angle'] = a
+                    if (not os.path.isfile('{root}/{des}/{mol}/MD_data/{mol}.{angle:03}.{type}.{c}.log'.format(**formatting)) 
+                        and not os.path.isfile('{root}/{des}/{mol}/MD_data/{mol}.{angle2:03}.{type}.{c}.log'.format(**formatting))):
+                        continue
+                    try:
+                        with open('{root}/{des}/{mol}/MD_data/{mol}.{angle:03}.{type}.{c}.log'.format(**formatting),'r') as fh:
+                            energy_file = fh.readlines()
+                    except FileNotFoundError:
+                        try:
+                            with open('{root}/{des}/{mol}/MD_data/{mol}.{angle2:03}.{type}.{c}.log'.format(**formatting),'r') as fh:
+                                energy_file = fh.readlines()
+                        except FileNotFoundError:
+                            continue
+                    try:
+                        with open('{root}/{des}/{mol}/MD_data/{mol}.{angle:03}.{type}.min.{c}.cnf'.format(**formatting),'r') as fh:
+                            coord_file = fh.readlines()
+                    except FileNotFoundError:
+                        try:
+                            with open('{root}/{des}/{mol}/MD_data/{mol}.{angle2:03}.{type}.min.{c}.cnf'.format(**formatting),'r') as fh:
+                                coord_file = fh.readlines()
+                        except FileNotFoundError:
+                            continue
+                    conf = extract_conf(coord_file)
+                    if conf is None:
+                        continue
+                    energies[a] = extract_ene(energy_file)
+                    angles[a] = dihedral_angle(conf[shifts[0]]['vec'], conf[shifts[1]]['vec'],
+                                               conf[shifts[2]]['vec'], conf[shifts[3]]['vec'], scale='deg')
+                if not energies:
+                    print('Nothing extracted for {type}:{des}:{mol}'.format(**formatting))
+                    continue
+                try:
+                    z_energy = energies[0]
+                except KeyError:
+                    try:
+                        z_energy = energies[5]
+                    except KeyError:
+                        continue
+                for i in energies:
+                    energies[i] -= z_energy
+                with open('{root}/{des}/{mol}/energies.{type}.txt'.format(**formatting), 'w') as fh:
+                    yaml.dump([energies, angles],fh)
+                with open('{root}/{des}/{mol}/fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                    yaml.dump(two_pass_lls(energies, angles, 3, phase=False), fh)
+                with open('{root}/{des}/{mol}/phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                    yaml.dump(two_pass_lls(energies, angles, 3, phase=[0,90]), fh)
+                with open('{root}/{des}/{mol}/onepass_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                    yaml.dump(one_pass_lls(energies, angles, phase=False), fh)
+                with open('{root}/{des}/{mol}/onepass_phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                    yaml.dump(one_pass_lls(energies, angles, phase=[0,90]), fh)
+
+def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
+    for t in types:
+        for m in molecules:
+            if m not in loaded_data:
+                continue
+            for d in basis_sets:
+                if d not in loaded_data[m]:
+                    continue
+                if t not in loaded_data[m][d]:
+                    continue
+                data = [{'x':loaded_data[m][d][t][1],
+                         'y':loaded_data[m][d][t][0],
+                         'marker':'b.'}]
+                forms = dict(root=root, mol=m, basis=d, t=t)
+                if t is None:
+                    save_path = '{root}/Figures/{mol}/{basis}.png'.format(**forms)
+                else:
+                    save_path = '{root}/Figures/{mol}/{basis}.{t}.png'.format(**forms)
+                    
+                fit = two_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], 3, phase=[0,90])
+                data.append({'x':[x/10 for x in range(3600)],
+                             'y':[energy_at_x(fit, x/10) for x in range(3600)],
+                             'marker':'b-'})
+                plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
+                      x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
+                      title='Dihedral profile for {mol} under {basis}'.format(**forms))
+                
+def plot_energies_all(root, basis_sets, molecules, loaded_data, types, data_set='Combined'):
     for m in molecules:
         if m not in loaded_data:
             continue
-        data = []
-        forms = dict(root=root, mol=m, name=data_set)
-        save_path = '{root}/Figures/{mol}/{name}.png'.format(**forms)
-        
-        for d in basis_sets:
-            if d not in loaded_data[m]:
+        for t in types:
+            data = []
+            forms = dict(root=root, mol=m, name=data_set, t=t)
+            if t is None:
+                save_path = '{root}/Figures/{mol}/{name}.png'.format(**forms)
+            else:
+                save_path = '{root}/Figures/{mol}/{name}.{t}.png'.format(**forms)
+            
+            for d in basis_sets:
+                if d not in loaded_data[m]:
+                    continue
+                if t not in loaded_data[m][d]:
+                    continue
+                point_data = {'x':loaded_data[m][d][t][1],
+                              'y':loaded_data[m][d][t][0],
+                              'label':d}
+                data.append(point_data)
+            if not data:
                 continue
-            point_data = {'x':loaded_data[m][d][1],
-                          'y':loaded_data[m][d][0],
-                          'label':d}
-            data.append(point_data)
+                        
+            plot_scatters(data, save_path, show_legend=True, xlim=(0,360), 
+                      x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
+                      title='Dihedral profile for {mol} under all setups'.format(**forms))
         
-        plot_scatters(data, save_path, show_legend=True, xlim=(0,360), 
-                  x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
-                  title='Dihedral profile for {mol} under all setups'.format(**forms))
-        
-def process_data(root, basis_sets, molecules):
+def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # load all data
     loaded_data = {}
     for m in molecules:
-        formatting = dict(root=root, mol=m)
-        if not os.path.isdir('{root}/Figures/{mol}/'.format(**formatting)):
-            os.makedirs('{root}/Figures/{mol}/'.format(**formatting))
-        for d in basis_sets:
-            formatting['basis'] = d
-            if not os.path.isfile('{root}/{basis}/{mol}/energies.txt'.format(**formatting)):
-                continue
-            with open('{root}/{basis}/{mol}/energies.txt'.format(**formatting), 'r') as fh:
-                energies, angles = yaml.load(fh)
-            if m in loaded_data:
-                loaded_data[m][d] = energies, angles
-            else:
-                loaded_data[m] = {d:(energies,angles)}
+        #loaded_data = {}
+        for t in types:
+            formatting = dict(root=root, mol=m)
+            if not os.path.isdir('{root}/Figures/{mol}/'.format(**formatting)):
+                os.makedirs('{root}/Figures/{mol}/'.format(**formatting))
+            for d in basis_sets:
+                formatting['basis'] = d
+                formatting['type'] = t
+                if not os.path.isfile('{root}/{basis}/{mol}/energies.{type}.txt'.format(**formatting)):
+                    continue
+                with open('{root}/{basis}/{mol}/energies.{type}.txt'.format(**formatting), 'r') as fh:
+                    energies, angles = yaml.load(fh)
+                print(m, t)
+                #energies, angles = prune_data(energies, angles)
+                
+                if m in loaded_data:
+                    if d in loaded_data[m]:
+                        loaded_data[m][d][t] = energies, angles
+                    else:
+                        loaded_data[m][d] = {t:(energies, angles)}
+                else:
+                    loaded_data[m] = {d:{t:(energies, angles)}}
+                #if m in loaded_data:
+                #    loaded_data[m][d] = energies, angles
+                #else:
+                #    loaded_data[m] = {d:(energies,angles)}
     # plot individual figures
-    plot_energies_individual(root, molecules, basis_sets, loaded_data)
+    plot_energies_individual(root, molecules, basis_sets, loaded_data, types)
     # plot all setups on one figure
-    plot_energies_all(root, basis_sets, molecules, loaded_data)
+    #plot_energies_all(root, basis_sets, molecules, loaded_data, types)
     # plot any selected groups of figures
+    #plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
     
 def generate_new_qm_jobs(root, mols, descrips):
     #############################
@@ -257,6 +373,245 @@ def generate_new_qm_jobs(root, mols, descrips):
                 continue
             gen_files(m, molecules[m], d, descriptors[d], root)
 
+def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
+    for m in molecules:
+        if m not in loaded_data:
+            continue
+        for d in descriptors:
+            if d not in loaded_data[m]:
+                continue
+            if 'qm' not in loaded_data[m][d]:
+                continue
+            qm_fit = one_pass_lls(loaded_data[m][d]['qm'][0], loaded_data[m][d]['qm'][1], phase=[0,90])
+            for t in types:
+                if t not in loaded_data[m][d]:
+                    continue
+                if t == 'qm':
+                    continue
+                forms = dict(root=root, mol=m, des=d, type=t, Type=t.upper())
+                save_path = '{root}/Figures/{mol}/{des}_Fitting.{type}.png'.format(**forms)
+                plotting_data = [{'x':loaded_data[m][d]['qm'][1],
+                                  'y':loaded_data[m][d]['qm'][0],
+                                  'marker':'bo',
+                                  'label':'QM raw'}]
+                
+                md_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
+                qm_fit_energies = [energy_at_x(qm_fit, x/10) for x in range(3600)]
+                md_fit_energies = [energy_at_x(md_fit, x/10) for x in range(3600)]
+                
+                diff_energies = list(array(qm_fit_energies) - array(md_fit_energies))
+                diff_fit = two_pass_lls(dict(zip(range(3600),diff_energies)),
+                                        dict(zip(range(3600),[x/10 for x in range(3600)])), limit=3, phase=False)
+                diff_fit_energies = [energy_at_x(diff_fit, x/10) for x in range(3600)]
+                
+                plotting_data.append({'x':[x/10 for x in range(3600)],
+                                      'y':qm_fit_energies,
+                                      'marker':'b-',
+                                      'label':'QM fit'})
+                plotting_data.append({'x':[x/10 for x in range(3600)],
+                                      'y':md_fit_energies,
+                                      'marker':'r-',
+                                      'label':t.upper() + ' fit'})
+                plotting_data.append({'x':[x/10 for x in range(3600)],
+                                      'y':diff_fit_energies,
+                                      'marker':'g-',
+                                      'label':'diff fit'})
+                plotting_data.append({'x':[x/10 for x in range(3600)],
+                                      'y':list(array(diff_fit_energies)+array(md_fit_energies)),
+                                      'marker':'k--',
+                                      'label':'MD + diff'})
+                
+                plotting_data.append({'x':loaded_data[m][d][t][1],
+                                      'y':loaded_data[m][d][t][0],
+                                      'marker':'ro',
+                                      'label':t.upper() + ' raw'})
+                plot_scatters(plotting_data, save_path, show_legend=False, xlim=(0,360),
+                          x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
+                          title='Fitting to dihedral profile for {mol}:{des} with {Type}'.format(**forms))
+                with open('{root}/Figures/{mol}/{des}_diff_fit.{type}.txt'.format(**forms), 'w') as fh:
+                    yaml.dump(diff_fit,fh)
+            
+
+def run_md_jobs(root, mols, descrips):
+    molecules = {'AMINO1': {'rigid':{'aa':[2,5,8,16],
+                                     'ua':[1,2,3,8],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'SHJ0',
+                            },
+                 'CHLORO1': {'rigid':{'aa':[2,5,8,14],
+                                     'ua':[1,2,3,6],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'ZB0H',
+                            },
+                 'HYDRO1': {'rigid':{'aa':[2,5,8,15],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'W6KL',
+                            },
+                 'METH1': {'rigid':{'aa':[2,5,8,10],
+                                     'ua':[1,2,3,4],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'4MUW',
+                            },
+                 'THIO1': {'rigid':{'aa':[2,5,8,15],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'5G2Q',
+                            },
+                 'AMINO-1': {'rigid':{'aa':[16,13,7,9],
+                                     'ua':[8,7,5,6],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'G564',
+                            },
+                 'CHLORO-1': {'rigid':{'aa':[2,5,8,14],
+                                     'ua':[1,2,3,6],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'PCRN',
+                            },
+                 'HYDRO-1': {'rigid':{'aa':[15,12,6,8],
+                                     'ua':[7,6,4,5],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'H5JT',
+                            },
+                 #'METH-1': {'rigid':{'aa':[2,5,8,10],
+                 #                    'ua':[1,2,3,4],
+                 #                    'gamess':[2,1,8,9],
+                 #                    },
+                 #           'name':'4MUW',
+                 #           },
+                 'THIO-1': {'rigid':{'aa':[2,5,8,15],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'ZK6W',
+                            },
+                 }
+    descriptors = {'Original': ['rigid']}
+    
+    with open(root + '/Parameters/Templates/dihedral.template','r') as fh:
+        imd_temp_1 = fh.read()
+    with open(root + '/Parameters/Templates/dihedral2.template','r') as fh:
+        imd_temp_2 = fh.read()
+    with open(root + '/Parameters/Templates/dihedral3.template','r') as fh:
+        imd_temp_3 = fh.read()
+    with open(root + '/Parameters/Templates/dihedral_constraint.template','r') as fh:
+        constraint_temp = fh.read()
+    
+    for m in mols:
+        forms = dict(mol=m, root=root)
+        aa_mtb = inlib.gromos_mtb_parse(genlib.load_file('{root}/Parameters/{mol}/{mol}.aa.mtb'.format(**forms)))
+        ua_mtb = inlib.gromos_mtb_parse(genlib.load_file('{root}/Parameters/{mol}/{mol}.ua.mtb'.format(**forms)))
+        
+        aa_work_mol = storage.Molecule(molecules[m]['name'], mtb=aa_mtb)
+        ua_work_mol = storage.Molecule(molecules[m]['name'], mtb=ua_mtb)
+        
+        for d in descrips:
+            forms['des'] = d
+            forms['outdir'] = '{root}/{des}/{mol}/MD_data'.format(**forms)
+            forms['name'] = molecules[m]['name']
+            if not os.path.exists('{outdir}'.format(**forms)):
+                os.makedirs('{outdir}'.format(**forms))
+            with open('{outdir}/{mol}.aa.1.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_1.format(**{'numberOfAtoms':aa_work_mol.atom_count}))
+            with open('{outdir}/{mol}.ua.1.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_1.format(**{'numberOfAtoms':ua_work_mol.atom_count}))
+            with open('{outdir}/{mol}.aa.2.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_2.format(**{'numberOfAtoms':aa_work_mol.atom_count}))
+            with open('{outdir}/{mol}.ua.2.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_2.format(**{'numberOfAtoms':ua_work_mol.atom_count}))
+            with open('{outdir}/{mol}.aa.3.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_3.format(**{'numberOfAtoms':aa_work_mol.atom_count}))
+            with open('{outdir}/{mol}.ua.3.imd'.format(**forms),'w') as fh:
+                fh.write(imd_temp_3.format(**{'numberOfAtoms':ua_work_mol.atom_count}))
+                
+                
+            os.chdir('{root}'.format(**forms))
+            
+            os.system(('/usr/local/gromos++/bin/make_top @build Parameters/{mol}/{mol}.aa.mtb Parameters/54A7.mtb '
+                       '@param Parameters/54A7.ifp @seq {name} @solv H2O > {outdir}/{mol}.aa.top'.format(**forms)))
+            os.system(('/usr/local/gromos++/bin/make_top @build Parameters/{mol}/{mol}.ua.mtb Parameters/54A7.mtb '
+                       '@param Parameters/54A7.ifp @seq {name} @solv H2O > {outdir}/{mol}.ua.top'.format(**forms)))
+            
+            for a in range(0,360,5):
+                skip_angle = False
+                forms['ang2'] = a
+                if a == 180:
+                    a = 179
+                forms['ang'] = a
+                try:
+                    with open('{root}/{des}/{mol}/{mol}.{ang:03}.log'.format(**forms), 'r') as fh:
+                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')
+                except FileNotFoundError:
+                    with open('{root}/{des}/{mol}/{mol}.{ang2:03}.log'.format(**forms), 'r') as fh:
+                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')
+                        
+                for atm in aa_work_mol.atoms:
+                    try:
+                        atm.xyz = gamess[atm.atm_name.upper()]['vec']
+                    except TypeError:
+                        print(atm.atm_name, d, m, a)
+                        skip_angle = True
+                        break
+                if skip_angle:
+                    continue
+                for atm in ua_work_mol.atoms:
+                    atm.xyz = gamess[atm.atm_name.upper()]['vec']
+                with open('{outdir}/{mol}.{ang:03}.aa.cnf'.format(**forms), 'w') as fh:
+                    fh.write(outlib.print_gromos_cnf(aa_work_mol))
+                with open('{outdir}/{mol}.{ang:03}.ua.cnf'.format(**forms), 'w') as fh:
+                    fh.write(outlib.print_gromos_cnf(ua_work_mol))
+                with open('{outdir}/{mol}.{ang:03}.aa.pdb'.format(**forms), 'w') as fh:
+                    fh.write(outlib.print_pdb(aa_work_mol))
+                with open('{outdir}/{mol}.{ang:03}.ua.pdb'.format(**forms), 'w') as fh:
+                    fh.write(outlib.print_pdb(ua_work_mol))
+                angs_aa, angs_ua = [], []
+                for des in descriptors[d]:
+                    atm_a = aa_work_mol.atom(molecules[m][des]['aa'][0]).xyz
+                    atm_b = aa_work_mol.atom(molecules[m][des]['aa'][1]).xyz
+                    atm_c = aa_work_mol.atom(molecules[m][des]['aa'][2]).xyz
+                    atm_d = aa_work_mol.atom(molecules[m][des]['aa'][3]).xyz
+                    ang = dihedral_angle(atm_a,atm_b,atm_c,atm_d,scale='deg')
+                    angs_aa.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0'.format(ang, *molecules[m][des]['aa']))
+                    angs_ua.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0'.format(ang, *molecules[m][des]['ua']))
+                with open('{outdir}/{mol}.{ang:03}.aa.constraints.dat'.format(**forms), 'w') as fh:
+                    fh.write(constraint_temp.format(**{'constraints':'\n'.join(angs_aa)}))
+                with open('{outdir}/{mol}.{ang:03}.ua.constraints.dat'.format(**forms), 'w') as fh:
+                    fh.write(constraint_temp.format(**{'constraints':'\n'.join(angs_ua)}))
+                # first pass
+                os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.aa.top @conf {outdir}/{mol}.{ang:03}.aa.cnf '
+                           '@input {outdir}/{mol}.aa.1.imd @fin {outdir}/{mol}.{ang:03}.aa.min.1.cnf @develop '
+                           '@dihrest {outdir}/{mol}.{ang:03}.aa.constraints.dat > {outdir}/{mol}.{ang:03}.aa.1.log'.format(**forms) ))
+                
+                os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.ua.top @conf {outdir}/{mol}.{ang:03}.ua.cnf '
+                           '@input {outdir}/{mol}.ua.1.imd @fin {outdir}/{mol}.{ang:03}.ua.min.1.cnf @develop '
+                           '@dihrest {outdir}/{mol}.{ang:03}.ua.constraints.dat > {outdir}/{mol}.{ang:03}.ua.1.log'.format(**forms) ))
+                ## second pass
+                #os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.aa.top @conf {outdir}/{mol}.{ang:03}.aa.min.1.cnf '
+                #           '@input {outdir}/{mol}.aa.2.imd @fin {outdir}/{mol}.{ang:03}.aa.min.2.cnf @develop '
+                #           '@dihrest {outdir}/{mol}.{ang:03}.aa.constraints.dat > {outdir}/{mol}.{ang:03}.aa.2.log'.format(**forms) ))
+                #
+                #os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.ua.top @conf {outdir}/{mol}.{ang:03}.ua.min.1.cnf '
+                #           '@input {outdir}/{mol}.ua.2.imd @fin {outdir}/{mol}.{ang:03}.ua.min.2.cnf @develop '
+                #           '@dihrest {outdir}/{mol}.{ang:03}.ua.constraints.dat > {outdir}/{mol}.{ang:03}.ua.2.log'.format(**forms) ))
+                #
+                ## third pass
+                #os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.aa.top @conf {outdir}/{mol}.{ang:03}.aa.min.2.cnf '
+                #           '@input {outdir}/{mol}.aa.3.imd @fin {outdir}/{mol}.{ang:03}.aa.min.3.cnf @develop '
+                #           '@dihrest {outdir}/{mol}.{ang:03}.aa.constraints.dat > {outdir}/{mol}.{ang:03}.aa.3.log'.format(**forms) ))
+                #
+                #os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.ua.top @conf {outdir}/{mol}.{ang:03}.ua.min.2.cnf '
+                #           '@input {outdir}/{mol}.ua.3.imd @fin {outdir}/{mol}.{ang:03}.ua.min.3.cnf @develop '
+                #           '@dihrest {outdir}/{mol}.{ang:03}.ua.constraints.dat > {outdir}/{mol}.{ang:03}.ua.3.log'.format(**forms) ))
+                
+
 def main():
     root = os.path.expanduser('~') + '/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions'
     
@@ -269,14 +624,44 @@ def main():
                    '60PsiBothAllFixed', '60PsiAllFixed',
                    '30PsiOriginal', '60PsiOriginal',
                    #'AllFixed', 'AllHeavyFixed',
-                    ]
-    molecules = ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1', 'AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1']
-    measure_angles = [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]]
-    #extract_energies(root, descriptors, molecules, measure_angles)
-    extract_energies(root, ['Original'], ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1'], [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]])
-    #process_data(root, descriptors, molecules)
-    process_data(root, ['Original'], ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1'])
+                    ]                                           
+    mols = {'AMINO-1'  : {'gamess':[2,1,8,9], 'aa' : [16,13,7,9], 'ua' : [8,7,5,6], },
+            'AMINO0'   : {'gamess':[2,1,8,9], },                                    
+            'AMINO1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,16] , 'ua' : [1,2,3,8], },
+            'AMINO2'   : {'gamess':[2,1,8,9], },                                    
+            'CHLORO-1' : {'gamess':[2,1,8,9], 'aa' : [2,5,8,14] , 'ua' : [1,2,3,6], },
+            'CHLORO0'  : {'gamess':[2,1,8,9], },                                    
+            'CHLORO1'  : {'gamess':[2,1,8,9], 'aa' : [2,5,8,14] , 'ua' : [1,2,3,6], },
+            'CHLORO2'  : {'gamess':[2,1,8,9], },                                    
+            'HYDRO-1'  : {'gamess':[2,1,8,9], 'aa' : [15,12,6,8], 'ua' : [7,6,4,5], },
+            'HYDRO0'   : {'gamess':[2,1,8,9], },                                    
+            'HYDRO1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
+            'HYDRO2'   : {'gamess':[2,1,8,9], },                                    
+            'METH-1'   : {'gamess':[2,1,8,9], },                                    
+            'METH0'    : {'gamess':[2,1,8,9], },                                    
+            'METH1'    : {'gamess':[2,1,8,9], 'aa' : [2,5,8,10] , 'ua' : [1,2,3,4], },
+            'METH2'    : {'gamess':[2,1,8,9], },                                    
+            'THIO-1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
+            'THIO0'    : {'gamess':[2,1,8,9], },                                    
+            'THIO1'    : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
+            'THIO2'    : {'gamess':[2,1,8,9], },                                    
+            }
+    all_mols = list(mols.keys())
+    qm_mols = [x for x in mols if 'gamess' in mols[x]]
+    qm_angles = [mols[x]['gamess'] for x in qm_mols]
+    #extract_energies_qm(root, descriptors, qm_mols, qm_angles)
+    #extract_energies_qm(root, ['Original'], ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'METH-1', 'THIO-1'], [[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9],[2,1,8,9]])
+    
+    
     #generate_new_qm_jobs(root, ['METH-1'], ['Original'])
-
+    #run_md_jobs(root, ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'THIO-1'], ['Original'])
+    md_mols = [x for x in mols if 'aa' in mols[x] and 'ua' in mols[x]]
+    md_angles = [mols[x] for x in md_mols]
+    #extract_energies_md(root, ['Original'], md_mols, md_angles)
+    #extract_energies_md(root, descriptors, md_mols, md_angles)
+    process_data(root, ['Original'], ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1'])
+    #process_data(root, ['Original'], all_mols)
+    #process_data(root, descriptors, all_mols)
+    
 if __name__ == '__main__':
     main()

@@ -224,12 +224,153 @@ def prune_data(energies, angles):
 def fit_torsion_terms_fft(energies, *angles):
     pass
 
+def rawminusraw(energiesA, energiesB, anglesA, limit, phase, fh):
+    diffEnergies, diffAngles = {}, {}
+    for i in energiesA:
+        if i in energiesB:
+            diffEnergies[i] = energiesA[i] - energiesB[i]
+            diffAngles[i] = anglesA[i]
+    fit = one_pass_lls(diffEnergies, diffAngles, limit, phase)
+    for term in fit:
+        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
+    print("RMSD fit = {:11.7f} \n".format(fit_deviation(diffEnergies, diffAngles, fit)), file=fh)
+    
+def fitminusraw(energiesA, energiesB, anglesA, anglesB, fitset, limit, rawphase, fitphase, fh):
+    if fitset == 'A':
+        fit = one_pass_lls(energiesA, anglesA, None, rawphase)
+    elif fitset == 'B':
+        fit = one_pass_lls(energiesB, anglesB, None, rawphase)
+        
+    energiesDIFF, anglesDIFF = {}, {}
+    if fitset == 'B':
+        angles = [(anglesA[x],x) for x in anglesA]
+    elif fitset == 'A':
+        angles = [(anglesB[x],x) for x in anglesB]
+    
+    for i in angles:
+        if fitset == 'A':
+            energiesDIFF[i[1]] = energy_at_x(fit, i[0]) - energiesB[i[1]]
+            anglesDIFF[i[1]] = i[0]
+        elif fitset == 'B':
+            energiesDIFF[i[1]] = energiesA[i[1]] - energy_at_x(fit, i[0]) 
+            anglesDIFF[i[1]] = i[0]
+    difffit = one_pass_lls(energiesDIFF, anglesDIFF, limit, fitphase)
+    
+    if fitset == 'A':
+        print("\nQM Fit:", file=fh)
+        for term in fit:
+            print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
+        print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesA, anglesA, fit)), file=fh)
+    elif fitset == 'B':
+        print("\nQM Fit:", file=fh)
+        for term in fit:
+            print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
+        print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesB, anglesB, fit)), file=fh)
+    print("\nDIFF Fit:", file=fh)
+    for term in difffit:
+        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**difffit[term]), file=fh)
+    print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesDIFF, anglesDIFF, difffit)), file=fh)
+    
+    
+    
+def fitminusfit(energiesA, energiesB, anglesA, anglesB, limit, rawphase, fitphase, fh):
+    afit = one_pass_lls(energiesA, anglesA, None, rawphase)
+    bfit = one_pass_lls(energiesB, anglesB, None, rawphase)
+    energiesDIFF, anglesDIFF = {}, {}
+    for i in range(360):
+        energiesDIFF[i] = energy_at_x(afit, i) - energy_at_x(bfit, i)
+        anglesDIFF[i] = i
+    difffit = one_pass_lls(energiesDIFF, anglesDIFF, limit, fitphase)
+    
+    print("\nQM Fit:", file=fh)
+    for term in afit:
+        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**afit[term]), file=fh)
+    print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesA, anglesA, afit)), file=fh)
+    
+    print("\nMD Fit:", file=fh)
+    for term in bfit:
+        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**bfit[term]), file=fh)
+    print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesB, anglesB, bfit)), file=fh)    
+        
+    print("\nDIFF Fit:", file=fh)
+    for term in difffit:
+        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**difffit[term]), file=fh)
+    print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesDIFF, anglesDIFF, difffit)), file=fh)
+    
+    
+
 def main(f, filePath):
     #import yaml
     
     #with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/Original/AMINO2/energies.qm.txt', 'r') as fh:
-    with open(filePath, 'r') as fh:
-        energies, angles = yaml.load(fh)
+    with open(filePath + "energies.qm.txt", 'r') as fh:
+        energiesQM, anglesQM = yaml.load(fh)
+    with open(filePath + "energies.aa.txt", 'r') as fh:
+        energiesAA, anglesAA = yaml.load(fh)
+    with open(filePath + "energies.ua.txt", 'r') as fh:
+        energiesUA, anglesUA = yaml.load(fh)
+    
+    print("Non-phased fitting to raw QM - raw AA:", file=f)
+    rawminusraw(energiesQM, energiesAA, anglesQM, 3, False, f)
+    print("Non-phased fitting to raw QM - raw UA:", file=f)
+    rawminusraw(energiesQM, energiesUA, anglesQM, 3, False, f)
+    print("Phased fitting to raw QM - raw AA:", file=f)
+    rawminusraw(energiesQM, energiesAA, anglesQM, 3, [0,90], f)
+    print("Phased fitting to raw QM - raw UA:", file=f)
+    rawminusraw(energiesQM, energiesUA, anglesQM, 3, [0,90], f)
+    print("===========================================", file=f)
+    
+    print("Non-phased fitting to raw QM - non-phased AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, False, f)
+    print("Non-phased fitting to raw QM - non-phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, False, f)
+    print("Non-phased fitting to raw QM - phased AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], False, f)
+    print("Non-phased fitting to raw QM - phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], False, f)
+    print("Phased fitting to raw QM - non-phased AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, [0,90], f)
+    print("Phased fitting to raw QM - non-phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, [0,90], f)
+    print("Phased fitting to raw QM - phased AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], [0,90], f)
+    print("Phased fitting to raw QM - phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], [0,90], f)
+    print("===========================================", file=f)
+    
+    print("Non-phased fitting to non-phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, False, f)
+    print("Non-phased fitting to non-phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, False, f)
+    print("Non-phased fitting to phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], False, f)
+    print("Non-phased fitting to phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], False, f)
+    print("Phased fitting to non-phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, [0,90], f)
+    print("Phased fitting to non-phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, [0,90], f)
+    print("Phased fitting to phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], [0,90], f)
+    print("Phased fitting to phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], [0,90], f)
+    print("===========================================", file=f)
+    
+    print("Non-phased fitting to non-phased QM - non-phased AA:", file=f)
+    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, False , False, f)   
+    print("Non-phased fitting to non-phased QM - non-phased UA:", file=f)
+    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, False , False, f)    
+    print("Non-phased fitting to phased QM - phased AA:", file=f)
+    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90] , False, f)
+    print("Non-phased fitting to phased QM - phased UA:", file=f)
+    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90] , False, f)
+    print("Phased fitting to phased QM - phased AA:", file=f)    
+    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90] , [0,90], f)
+    print("Phased fitting to phased QM - phased UA:", file=f)    
+    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90] , [0,90], f)
+    
+    
+    
     #energies, angles = prune_data(energies, angles)
     #energies, angles = {}, {}
     #phases = [random.triangular(-np.pi/2, np.pi/2) for _ in range(12)]
@@ -253,88 +394,88 @@ def main(f, filePath):
     #    angles[i] = i
     ##angles = list(range(360))
     #print(fit)
-    opnophasefit = one_pass_lls(energies, angles, 3, False)
-    opphasefit = one_pass_lls(energies, angles, 3, [0,90])
-    
-    tpnophasefit = two_pass_lls(energies, angles, 3, False)
-    tpphasefit = two_pass_lls(energies, angles, 3, [0,90])
-    
-    mpnophasefit = multi_pass_lls(energies, angles, 3, phase=False)
-    mpphasefit = multi_pass_lls(energies, angles, 3, phase=[0,90])
-    rmsds = []
-    for fit in [opnophasefit, tpnophasefit, mpnophasefit,opphasefit, tpphasefit, mpphasefit]:
-        rmsds.append(fit_deviation(energies, angles, fit))
-    print("One pass non-phased fitting:", file=f)
-    for term in opnophasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**opnophasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[0]), file=f)
-    
-    print("Two pass non-phased fitting:", file=f)
-    for term in tpnophasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**tpnophasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[1]), file=f)
-    
-    print("Multi pass non-phased fitting:", file=f)
-    for term in mpnophasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**mpnophasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[2]), file=f)
-    
-    print("One pass phased fitting:", file=f)
-    for term in opphasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**opphasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[3]), file=f)
-    
-    print("Two pass phased fitting:", file=f)
-    for term in tpphasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**tpphasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[4]), file=f)
-    
-    print("Multi pass phased fitting:", file=f)
-    for term in mpphasefit:
-        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**mpphasefit[term]), file=f)
-    print("RMSD = {:11.8f}\n".format(rmsds[5]), file=f)
+#    opnophasefit = one_pass_lls(energies, angles, 3, False)
+#    opphasefit = one_pass_lls(energies, angles, 3, [0,90])
+#    
+#    tpnophasefit = two_pass_lls(energies, angles, 3, False)
+#    tpphasefit = two_pass_lls(energies, angles, 3, [0,90])
+#    
+#    mpnophasefit = multi_pass_lls(energies, angles, 3, phase=False)
+#    mpphasefit = multi_pass_lls(energies, angles, 3, phase=[0,90])
+#    rmsds = []
+#    for fit in [opnophasefit, tpnophasefit, mpnophasefit,opphasefit, tpphasefit, mpphasefit]:
+#        rmsds.append(fit_deviation(energies, angles, fit))
+#    print("One pass non-phased fitting:", file=f)
+#    for term in opnophasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**opnophasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[0]), file=f)
+#    
+#    print("Two pass non-phased fitting:", file=f)
+#    for term in tpnophasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**tpnophasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[1]), file=f)
+#    
+#    print("Multi pass non-phased fitting:", file=f)
+#    for term in mpnophasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**mpnophasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[2]), file=f)
+#    
+#    print("One pass phased fitting:", file=f)
+#    for term in opphasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**opphasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[3]), file=f)
+#    
+#    print("Two pass phased fitting:", file=f)
+#    for term in tpphasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**tpphasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[4]), file=f)
+#    
+#    print("Multi pass phased fitting:", file=f)
+#    for term in mpphasefit:
+#        print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**mpphasefit[term]), file=f)
+#    print("RMSD = {:11.8f}\n".format(rmsds[5]), file=f)
     #fit = one_pass_lls(energies, angles, 3, phase=[0,90])
     #fit_deviation(energies, angles, fit)
     #fit = two_pass_lls(energies, angles, 3)
     #for i in fit:
     #    print(fit[i])
-    return rmsds
+    #return rmsds
 
 if __name__ == '__main__':
     from time import process_time
     import os
     mean_rmsds = [0,0,0,0,0,0]
     #iterations = 50000
-    roots = ['30PsiAllFixed', '60PsiBothAllFixed', 'AllHeavyFixed', 'Figures_Pruned', '30PsiBothAllFixed', 
-             '60PsiOriginal', 'BothAllFixed', 'Figures_Raw', 'Original', 'ThetaAllFixed', '30PsiBothCarbonFixed', 
-             'BothCarbonFixed', 'FunctionalFixed', 'ThetaCarbonFixed', '30PsiCarbonFixed', 'PsiAllFixed', '30PsiOriginal', 
-             'AllCarbonFixed', 'PsiCarbonFixed', '60PsiAllFixed', 'AllFixed']
+    #roots = ['30PsiAllFixed', '60PsiBothAllFixed', 'AllHeavyFixed', 'Figures_Pruned', '30PsiBothAllFixed', 
+    #         '60PsiOriginal', 'BothAllFixed', 'Figures_Raw', 'Original', 'ThetaAllFixed', '30PsiBothCarbonFixed', 
+    #         'BothCarbonFixed', 'FunctionalFixed', 'ThetaCarbonFixed', '30PsiCarbonFixed', 'PsiAllFixed', '30PsiOriginal', 
+    #         'AllCarbonFixed', 'PsiCarbonFixed', '60PsiAllFixed', 'AllFixed']
+    roots = ['Original']
     mols = ['AMINO','CHLORO','HYDRO','METH','THIO']
-    types = [-1,0,1,2]
+    types = [-1] #[-1,0,1,2]
     levls = ['aa','ua','qm']
     
     i = 0
-    with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/allrawDatafittings.txt', 'w') as fh:
-        start_time = process_time()
-        for r in roots:
-            for m in mols:
-                for t in types:
-                    for l in levls:
-                        file_path = "/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/{}/{}{}/energies.{}.txt".format(r,m,t,l)
-                        if not os.path.isfile(file_path):
-                            continue
-                        i += 1
-                        fh.write("Real data test: {}.{}{}.{}\n___________________________________________\n".format(r,m,t,l))
-                        returned_rmsds = main(fh, file_path)
-                        fh.write("___________________________________________\n\n")
-                        for j in range(len(returned_rmsds)):
-                            mean_rmsds[j] += returned_rmsds[j]
-                        if not (i) % 10:
-                            group_time = process_time()
-                            print("On iteration: ", i+1, ", time for last 10 = ", int(group_time - start_time))
-                            start_time = group_time
-        fh.write("Final mean rmsds after {} iterations:\n".format(i))
-        for j in mean_rmsds:
-            fh.write("{}\n".format(j/i))
-        
+    
+    start_time = process_time()
+    for r in roots:
+        for m in mols:
+            for t in types:
+                #for l in levls:
+                file_path = "/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/{}/{}{}/".format(r,m,t)
+                if not os.path.isfile(file_path + 'energies.aa.txt'):
+                    continue
+                with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/differenceMethods_{}{}.txt'.format(m,t), 'w') as fh:
+                    main(fh, file_path)
+                
+#                    for j in range(len(returned_rmsds)):
+#                        mean_rmsds[j] += returned_rmsds[j]
+#                    if not (i) % 10:
+#                        group_time = process_time()
+#                        print("On iteration: ", i+1, ", time for last 10 = ", int(group_time - start_time))
+#                        start_time = group_time
+#        fh.write("Final mean rmsds after {} iterations:\n".format(i))
+#        for j in mean_rmsds:
+#            fh.write("{}\n".format(j/i))
+#        
     

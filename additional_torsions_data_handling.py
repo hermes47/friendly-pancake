@@ -6,12 +6,13 @@ Created on 14/01/2016
 import os
 import yaml
 
-from vector_math_functions import dihedral_angle, two_pass_lls, one_pass_lls, energy_at_x, prune_data
+from vector_math_functions import dihedral_angle, two_pass_lls, one_pass_lls, energy_at_x, prune_data, fit_deviation
 from gamess_extraction import extract_conformation, extract_energy
 from gromos_extraction import extract_conf, extract_ene
 from plotting import plot_scatters
 from mrsuper.lib import genlib, inlib, outlib, storage
-from numpy import array
+from numpy import array, mean
+import numpy as np
 
 def extract_energies_qm(root, descriptors, molecules, angles_to_measure):
     for b in descriptors:
@@ -147,10 +148,15 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                 else:
                     save_path = '{root}/Figures/{mol}/{basis}.{t}.png'.format(**forms)
                     
-                fit = two_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], 3, phase=[0,90])
+                fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
+                cauchy_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
+    
                 data.append({'x':[x/10 for x in range(3600)],
                              'y':[energy_at_x(fit, x/10) for x in range(3600)],
                              'marker':'b-'})
+                data.append({'x':[x/10 for x in range(3600)],
+                             'y':[energy_at_x(cauchy_fit, x/10) for x in range(3600)],
+                             'marker':'r-'})
                 plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
                       x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
                       title='Dihedral profile for {mol} under {basis}'.format(**forms))
@@ -182,7 +188,22 @@ def plot_energies_all(root, basis_sets, molecules, loaded_data, types, data_set=
             plot_scatters(data, save_path, show_legend=True, xlim=(0,360), 
                       x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
                       title='Dihedral profile for {mol} under all setups'.format(**forms))
+
+def derivatives(energies, angles, mol):
+    derivatives = []
+    initial_angle = sorted(angles, key=lambda x:angles[x])[0]
+    for ang in sorted(angles, key=lambda x:angles[x])[1:]:
+        derivatives.append((energies[ang] - energies[initial_angle])/(angles[ang] - angles[initial_angle]))
+        initial_angle = ang
+    mean = np.mean(derivatives)
+    median = np.median(derivatives)
+    max = np.max(derivatives)
+    min = np.min(derivatives)
+    
+    print(mol, ":", mean, median, max, min)
         
+    
+       
 def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # load all data
     loaded_data = {}
@@ -199,8 +220,13 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
                     continue
                 with open('{root}/{basis}/{mol}/energies.{type}.txt'.format(**formatting), 'r') as fh:
                     energies, angles = yaml.load(fh)
-                print(m, t)
+                #print(m, t)
+                #if t == 'ua' and m in ['METH0','METH-1']:
+                derivatives(energies, angles, m + t)
                 #energies, angles = prune_data(energies, angles)
+                mean_energy = mean([energies[x] for x in energies])
+                for x in energies:
+                    energies[x] -= mean_energy
                 
                 if m in loaded_data:
                     if d in loaded_data[m]:
@@ -209,6 +235,9 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
                         loaded_data[m][d] = {t:(energies, angles)}
                 else:
                     loaded_data[m] = {d:{t:(energies, angles)}}
+                    
+                if t == 'qm' and d == 'Original':# and (m.endswith('-1') or m.endswith('0')):
+                    sampling_density(root, m, loaded_data[m][d][t])
                 #if m in loaded_data:
                 #    loaded_data[m][d] = energies, angles
                 #else:
@@ -218,7 +247,7 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # plot all setups on one figure
     #plot_energies_all(root, basis_sets, molecules, loaded_data, types)
     # plot any selected groups of figures
-    #plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
+    plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
     
 def generate_new_qm_jobs(root, mols, descrips):
     #############################
@@ -373,6 +402,43 @@ def generate_new_qm_jobs(root, mols, descrips):
                 continue
             gen_files(m, molecules[m], d, descriptors[d], root)
 
+def sampling_density(root, molecule, loaded_data):
+    if not os.path.isdir('{}/SamplingDensity'.format(root)):
+        os.mkdir('{}/SamplingDensity'.format(root))
+    energies, angles = loaded_data
+    sample_sets = {"05 deg": list(range(0,360,5)),  
+                   "10 deg": list(range(0,360,10)), 
+                   "15 deg": list(range(0,360,15)), 
+                   "20 deg": list(range(0,360,20)), 
+                   "30 deg": list(range(0,360,30)), 
+                   "expected peaks": [355,0,5,55,60,65,115,120,125,175,180,185,235,240,245,295,300,305],
+                   "expected peaks with midpoints": [355,0,5,55,60,65,115,120,125,175,180,185,235,240,
+                                                     245,295,300,305,30,90,150,210,270,330],
+                   "expected peaks with midpoints half": [355,5,55,65,115,125,175,185,235,
+                                                     245,295,305,30,90,150,210,270,330],
+                   "expected troughs with midpoints":[0,55,60,65,120,175,180,185,240,295,300,305,30,90,150,210,270,330]
+                   }
+    formatting = dict(mol=molecule, root=root)
+    with open('{root}/SamplingDensity/{mol}.qm.txt'.format(**formatting), 'w') as fh:
+        for sample in sorted(sample_sets):
+            sampleEnergies, sampleAngles = {}, {}
+            for x in sample_sets[sample]:
+                if x == 180:
+                    try:
+                        sampleEnergies[x-1] = energies[x-1]
+                        sampleAngles[x-1] = angles[x-1]
+                    except KeyError:
+                        pass 
+                try:
+                    sampleEnergies[x] = energies[x]
+                    sampleAngles[x] = angles[x]
+                except KeyError:
+                    pass#print('Missing {}: {}'.format(molecule, x))
+            sampleFit = one_pass_lls(sampleEnergies, sampleAngles,  phase=[0,90])
+            sampleRMSD = fit_deviation(energies, angles, sampleFit)
+            fh.write('{}: {:.4f}\n'.format(sample, sampleRMSD))
+            
+
 def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
     for m in molecules:
         if m not in loaded_data:
@@ -382,7 +448,7 @@ def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
                 continue
             if 'qm' not in loaded_data[m][d]:
                 continue
-            qm_fit = one_pass_lls(loaded_data[m][d]['qm'][0], loaded_data[m][d]['qm'][1], phase=[0,90])
+            qm_fit = one_pass_lls(loaded_data[m][d]['qm'][0], loaded_data[m][d]['qm'][1], phase=[0,90], method='cauchy')
             for t in types:
                 if t not in loaded_data[m][d]:
                     continue
@@ -395,13 +461,13 @@ def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
                                   'marker':'bo',
                                   'label':'QM raw'}]
                 
-                md_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
+                md_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
                 qm_fit_energies = [energy_at_x(qm_fit, x/10) for x in range(3600)]
                 md_fit_energies = [energy_at_x(md_fit, x/10) for x in range(3600)]
                 
                 diff_energies = list(array(qm_fit_energies) - array(md_fit_energies))
-                diff_fit = two_pass_lls(dict(zip(range(3600),diff_energies)),
-                                        dict(zip(range(3600),[x/10 for x in range(3600)])), limit=3, phase=False)
+                diff_fit = one_pass_lls(dict(zip(range(3600),diff_energies)),
+                                        dict(zip(range(3600),[x/10 for x in range(3600)])), limit=3, phase=False, method='cauchy')
                 diff_fit_energies = [energy_at_x(diff_fit, x/10) for x in range(3600)]
                 
                 plotting_data.append({'x':[x/10 for x in range(3600)],
@@ -433,41 +499,30 @@ def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
             
 
 def run_md_jobs(root, mols, descrips):
-    molecules = {'AMINO1': {'rigid':{'aa':[2,5,8,16],
-                                     'ua':[1,2,3,8],
-                                     'gamess':[2,1,8,9],
-                                     },
-                            'name':'SHJ0',
-                            },
-                 'CHLORO1': {'rigid':{'aa':[2,5,8,14],
-                                     'ua':[1,2,3,6],
-                                     'gamess':[2,1,8,9],
-                                     },
-                            'name':'ZB0H',
-                            },
-                 'HYDRO1': {'rigid':{'aa':[2,5,8,15],
-                                     'ua':[1,2,3,7],
-                                     'gamess':[2,1,8,9],
-                                     },
-                            'name':'W6KL',
-                            },
-                 'METH1': {'rigid':{'aa':[2,5,8,10],
-                                     'ua':[1,2,3,4],
-                                     'gamess':[2,1,8,9],
-                                     },
-                            'name':'4MUW',
-                            },
-                 'THIO1': {'rigid':{'aa':[2,5,8,15],
-                                     'ua':[1,2,3,7],
-                                     'gamess':[2,1,8,9],
-                                     },
-                            'name':'5G2Q',
-                            },
+    molecules = {
                  'AMINO-1': {'rigid':{'aa':[16,13,7,9],
                                      'ua':[8,7,5,6],
                                      'gamess':[2,1,8,9],
                                      },
                             'name':'G564',
+                            },
+                 'AMINO0': {'rigid':{'aa':[2,5,8,13],
+                                     'ua':[1,2,3,8],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'N0GW',
+                            },
+                 'AMINO1': {'rigid':{'aa':[2,5,8,16],
+                                     'ua':[1,2,3,8],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'SHJ0',
+                            },
+                 'AMINO2': {'rigid':{'aa':[7,10,12,15],
+                                     'ua':[5,6,7,8],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'6AT1',
                             },
                  'CHLORO-1': {'rigid':{'aa':[2,5,8,14],
                                      'ua':[1,2,3,6],
@@ -475,27 +530,102 @@ def run_md_jobs(root, mols, descrips):
                                      },
                             'name':'PCRN',
                             },
+                 'CHLORO0': {'rigid':{'aa':[2,5,8,11],
+                                     'ua':[1,2,3,5],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'682F',
+                            },
+                 'CHLORO1': {'rigid':{'aa':[2,5,8,14],
+                                     'ua':[1,2,3,6],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'ZB0H',
+                            },
+                 'CHLORO2': {'rigid':{'aa':[10,8,17,20],
+                                     'ua':[5,4,7,8],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'35MG',
+                            },
                  'HYDRO-1': {'rigid':{'aa':[15,12,6,8],
                                      'ua':[7,6,4,5],
                                      'gamess':[2,1,8,9],
                                      },
                             'name':'H5JT',
                             },
-                 #'METH-1': {'rigid':{'aa':[2,5,8,10],
-                 #                    'ua':[1,2,3,4],
-                 #                    'gamess':[2,1,8,9],
-                 #                    },
-                 #           'name':'4MUW',
-                 #           },
+                 'HYDRO0': {'rigid':{'aa':[2,5,8,12],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'G096',
+                            },
+                 'HYDRO1': {'rigid':{'aa':[2,5,8,15],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'W6KL',
+                            },
+                 'HYDRO2': {'rigid':{'aa':[2,5,8,10],
+                                     'ua':[1,2,3,4],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'5KRK',
+                            },
+                 'METH-1': {'rigid':{'aa':[2,5,8,14],
+                                     'ua':[1,2,3,5],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'G011',
+                            },
+                 'METH0': {'rigid':{'aa':[2,5,8,14],
+                                     'ua':[1,2,3,5],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'G011',
+                            },
+                 'METH1': {'rigid':{'aa':[2,5,8,10],
+                                     'ua':[1,2,3,4],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'4MUW',
+                            },
+                 'METH2': {'rigid':{'aa':[2,5,8,10],
+                                     'ua':[1,2,3,4],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'YE4E',
+                            },
                  'THIO-1': {'rigid':{'aa':[2,5,8,15],
                                      'ua':[1,2,3,7],
                                      'gamess':[2,1,8,9],
                                      },
                             'name':'ZK6W',
                             },
+                 'THIO0': {'rigid':{'aa':[2,5,8,12],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'1QIU',
+                            },
+                 'THIO1': {'rigid':{'aa':[2,5,8,15],
+                                     'ua':[1,2,3,7],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'5G2Q',
+                            },
+                 'THIO2': {'rigid':{'aa':[6,9,18,21],
+                                     'ua':[4,5,8,9],
+                                     'gamess':[2,1,8,9],
+                                     },
+                            'name':'PJLY',
+                            },
                  }
     descriptors = {'Original': ['rigid']}
-    
+    #'AMINO-1'  : {'gamess':[2,1,8,9], 'aa' : [16,13,7,9], 'ua' : [8,7,5,6], }
+    #for m in sorted(molecules):
+    #    print("'{}' : {},".format(m, molecules[m]['rigid']))
+    #return
     with open(root + '/Parameters/Templates/dihedral.template','r') as fh:
         imd_temp_1 = fh.read()
     with open(root + '/Parameters/Templates/dihedral2.template','r') as fh:
@@ -506,6 +636,7 @@ def run_md_jobs(root, mols, descrips):
         constraint_temp = fh.read()
     
     for m in mols:
+        
         forms = dict(mol=m, root=root)
         aa_mtb = inlib.gromos_mtb_parse(genlib.load_file('{root}/Parameters/{mol}/{mol}.aa.mtb'.format(**forms)))
         ua_mtb = inlib.gromos_mtb_parse(genlib.load_file('{root}/Parameters/{mol}/{mol}.ua.mtb'.format(**forms)))
@@ -551,15 +682,17 @@ def run_md_jobs(root, mols, descrips):
                         gamess = extract_conformation(fh.readlines(), scale=1, key='name')
                 except FileNotFoundError:
                     with open('{root}/{des}/{mol}/{mol}.{ang2:03}.log'.format(**forms), 'r') as fh:
-                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')
-                        
+                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')     
                 for atm in aa_work_mol.atoms:
                     try:
                         atm.xyz = gamess[atm.atm_name.upper()]['vec']
                     except TypeError:
-                        print(atm.atm_name, d, m, a)
+                        print('TypeError', atm.atm_name, d, m, a)
                         skip_angle = True
                         break
+                    except KeyError:
+                        print('KeyError', atm.atm_name, d, m, a)
+                        raise
                 if skip_angle:
                     continue
                 for atm in ua_work_mol.atoms:
@@ -625,26 +758,26 @@ def main():
                    '30PsiOriginal', '60PsiOriginal',
                    #'AllFixed', 'AllHeavyFixed',
                     ]                                           
-    mols = {'AMINO-1'  : {'gamess':[2,1,8,9], 'aa' : [16,13,7,9], 'ua' : [8,7,5,6], },
-            'AMINO0'   : {'gamess':[2,1,8,9], },                                    
-            'AMINO1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,16] , 'ua' : [1,2,3,8], },
-            'AMINO2'   : {'gamess':[2,1,8,9], },                                    
-            'CHLORO-1' : {'gamess':[2,1,8,9], 'aa' : [2,5,8,14] , 'ua' : [1,2,3,6], },
-            'CHLORO0'  : {'gamess':[2,1,8,9], },                                    
-            'CHLORO1'  : {'gamess':[2,1,8,9], 'aa' : [2,5,8,14] , 'ua' : [1,2,3,6], },
-            'CHLORO2'  : {'gamess':[2,1,8,9], },                                    
-            'HYDRO-1'  : {'gamess':[2,1,8,9], 'aa' : [15,12,6,8], 'ua' : [7,6,4,5], },
-            'HYDRO0'   : {'gamess':[2,1,8,9], },                                    
-            'HYDRO1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
-            'HYDRO2'   : {'gamess':[2,1,8,9], },                                    
-            'METH-1'   : {'gamess':[2,1,8,9], },                                    
-            'METH0'    : {'gamess':[2,1,8,9], },                                    
-            'METH1'    : {'gamess':[2,1,8,9], 'aa' : [2,5,8,10] , 'ua' : [1,2,3,4], },
-            'METH2'    : {'gamess':[2,1,8,9], },                                    
-            'THIO-1'   : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
-            'THIO0'    : {'gamess':[2,1,8,9], },                                    
-            'THIO1'    : {'gamess':[2,1,8,9], 'aa' : [2,5,8,15] , 'ua' : [1,2,3,7], },
-            'THIO2'    : {'gamess':[2,1,8,9], },                                    
+    mols = {'AMINO-1' : {'gamess': [2, 1, 8, 9], 'aa': [16, 13, 7, 9], 'ua': [8, 7, 5, 6]},
+            'AMINO0' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 13], 'ua': [1, 2, 3, 8]},
+            'AMINO1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 16], 'ua': [1, 2, 3, 8]},
+            'AMINO2' : {'gamess': [2, 1, 8, 9], 'aa': [7, 10, 12, 15], 'ua': [5, 6, 7, 8]},
+            'CHLORO-1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 14], 'ua': [1, 2, 3, 6]},
+            'CHLORO0' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 11], 'ua': [1, 2, 3, 5]},
+            'CHLORO1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 14], 'ua': [1, 2, 3, 6]},
+            'CHLORO2' : {'gamess': [2, 1, 8, 9], 'aa': [10, 8, 17, 20], 'ua': [5, 4, 7, 8]},
+            'HYDRO-1' : {'gamess': [2, 1, 8, 9], 'aa': [15, 12, 6, 8], 'ua': [7, 6, 4, 5]},
+            'HYDRO0' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 12], 'ua': [1, 2, 3, 7]},
+            'HYDRO1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 15], 'ua': [1, 2, 3, 7]},
+            'HYDRO2' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 10], 'ua': [1, 2, 3, 4]},
+            'METH-1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 14], 'ua': [5, 3, 2, 1]},
+            'METH0' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 14], 'ua': [5, 3, 2, 1]},
+            'METH1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 10], 'ua': [1, 2, 3, 4]},
+            'METH2' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 10], 'ua': [1, 2, 3, 4]},
+            'THIO-1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 15], 'ua': [1, 2, 3, 7]},
+            'THIO0' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 12], 'ua': [1, 2, 3, 7]},
+            'THIO1' : {'gamess': [2, 1, 8, 9], 'aa': [2, 5, 8, 15], 'ua': [1, 2, 3, 7]},
+            'THIO2' : {'gamess': [2, 1, 8, 9], 'aa': [6, 9, 18, 21], 'ua': [4, 5, 8, 9]},                                   
             }
     all_mols = list(mols.keys())
     qm_mols = [x for x in mols if 'gamess' in mols[x]]
@@ -654,13 +787,13 @@ def main():
     
     
     #generate_new_qm_jobs(root, ['METH-1'], ['Original'])
-    #run_md_jobs(root, ['AMINO-1', 'CHLORO-1', 'HYDRO-1', 'THIO-1'], ['Original'])
+    #run_md_jobs(root, qm_mols, ['Original'])
     md_mols = [x for x in mols if 'aa' in mols[x] and 'ua' in mols[x]]
     md_angles = [mols[x] for x in md_mols]
     #extract_energies_md(root, ['Original'], md_mols, md_angles)
     #extract_energies_md(root, descriptors, md_mols, md_angles)
-    process_data(root, ['Original'], ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1'])
-    #process_data(root, ['Original'], all_mols)
+    #process_data(root, ['Original'], ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1'])
+    process_data(root, ['Original'], all_mols)
     #process_data(root, descriptors, all_mols)
     
 if __name__ == '__main__':

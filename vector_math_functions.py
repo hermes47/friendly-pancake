@@ -44,6 +44,11 @@ def perform_fit(matrix, target, fit_phase, fit_method='svd'):
         x = np.linalg.solve(r, d)
     elif fit_method == 'svd':
         x = np.linalg.lstsq(matrix, target)[0]
+    elif fit_method == 'cauchy':
+        initial_values = np.linalg.lstsq(matrix, target)[0]
+        x = newton_raphson(matrix, target, initial_values)
+    
+    
         
     fit = []
     if not fit_phase:
@@ -66,7 +71,195 @@ def perform_fit(matrix, target, fit_phase, fit_method='svd'):
         
     return fit
 
-def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicites=list(range(1,7)), baseline_shift=False):
+def test_case(coefficient_matrix, target_vector, beta_values):
+    term_vector = np.zeros(3)
+    term_vector[0] = beta_values[0]**2 + beta_values[1]**2 + beta_values[2]**2 -3
+    term_vector[1] = beta_values[0]**2 + beta_values[1]**2 - beta_values[2] - 1
+    term_vector[2] = beta_values[0] + beta_values[1] + beta_values[2] - 3
+    return -term_vector
+
+def test_case_derivative(coefficient_matrix, target_vector, beta_values):
+    jacobian = np.zeros((3,3))
+    jacobian[0][0] = 2*beta_values[0]
+    jacobian[0][1] = 2*beta_values[1]
+    jacobian[0][2] = 2*beta_values[2]
+    jacobian[1][0] = 2*beta_values[0]
+    jacobian[1][1] = 2*beta_values[1]
+    jacobian[1][2] = -1
+    jacobian[2][0] = 1
+    jacobian[2][1] = 1
+    jacobian[2][2] = 1
+    return jacobian
+
+def arctan(coefficient_matrix, target_vector, beta_values):
+    term_vector = np.zeros(len(beta_values))
+    for i in range(len(term_vector)):
+        sum_term = 0
+        for j in range(len(target_vector)):
+            common_term = np.sum(coefficient_matrix[j] * beta_values) - target_vector[j]
+            sum_term += (2 * common_term * coefficient_matrix[j][i]) / (common_term ** 4 + 1)
+        term_vector[i] = -sum_term
+    
+    return term_vector
+
+def arctan_derivative(coefficient_matrix, target_vector, beta_values):
+    # return the Jacobian
+    jacobian = np.zeros((len(beta_values),len(beta_values)))
+    for row in range(len(beta_values)):
+        for col in range(len(beta_values)):
+            sum_term = 0
+            for conf in range(len(target_vector)):
+                const_term = (np.sum(coefficient_matrix[conf] * beta_values) - target_vector[conf])**4
+                multi = coefficient_matrix[conf][row] * coefficient_matrix[conf][col]
+                sum_term += (2 * multi)/(const_term + 1) - (8 * multi * const_term)/((const_term + 1)**2)
+            jacobian[row][col] = sum_term
+            
+    return jacobian
+
+def cauchy(coefficient_matrix, target_vector, beta_values):
+    # return the jacobian solution
+    term_vector = np.zeros(len(beta_values))   # this is going to become b in the new equation to solve
+    #print(len(target_vector))
+    for i in range(len(term_vector)):        # i give the i-th simultaneous equation in the result
+        sum_term = 0
+        for j in range(len(target_vector)):  # j give the j-th simultaneous equation in the source
+            common_term = np.sum(coefficient_matrix[j] * beta_values) - target_vector[j]
+            sum_term += (2 * common_term * coefficient_matrix[j][i]) / (common_term ** 2 + 1)
+        term_vector[i] = -sum_term
+    
+    return term_vector
+
+def cauchy_derivative(coefficient_matrix, target_vector, beta_values):
+    # return the Jacobian
+    jacobian = np.zeros((len(beta_values),len(beta_values)))
+    for row in range(len(beta_values)):
+        for col in range(len(beta_values)):
+            sum_term = 0
+            for conf in range(len(target_vector)):
+                const_term = (np.sum(coefficient_matrix[conf] * beta_values) - target_vector[conf])**2
+                multi = coefficient_matrix[conf][row] * coefficient_matrix[conf][col]
+                sum_term += (2 * multi)/(const_term + 1) - (4 * multi * const_term)/((const_term + 1)**2)
+            jacobian[row][col] = sum_term
+            
+    #print(jacobian)
+    return jacobian
+
+def lls(coefficient_matrix, target_vector, beta_values):
+    term_vector = np.zeros(len(beta_values))
+    for i in range(len(term_vector)):
+        sum_term = 0
+        for j in range(len(target_vector)):
+            common_term = np.sum(coefficient_matrix[j] * beta_values) - target_vector[j]
+            sum_term += 2 * common_term * coefficient_matrix[j][i]
+        term_vector[i] = -sum_term
+    #print(term_vector)
+    return term_vector
+
+def lls_derivative(coefficient_matrix, target_vector, beta_values):
+    jacobian = np.zeros((len(beta_values),len(beta_values)))
+    for row in range(len(beta_values)):
+        for col in range(len(beta_values)):
+            sum_term = 0
+            for conf in range(len(target_vector)):
+                sum_term += coefficient_matrix[conf][row] * coefficient_matrix[conf][col] * 2
+            jacobian[row][col] = sum_term
+    #print(jacobian)
+    return jacobian
+
+def smooth_approx(coefficient_matrix, target_vector, beta_values):
+    term_vector = np.zeros(len(beta_values))   # this is going to become b in the new equation to solve
+    for i in range(len(term_vector)):        # i give the i-th simultaneous equation in the result
+        sum_term = 0
+        for j in range(len(target_vector)):  # j give the j-th simultaneous equation in the source
+            common_term = np.sum(coefficient_matrix[j] * beta_values) - target_vector[j]
+            sum_term += (2 * common_term * coefficient_matrix[j][i]) / np.sqrt((common_term ** 2 + 1))
+        term_vector[i] = -sum_term
+    
+    return term_vector
+
+def smooth_approx_derivative(coefficient_matrix, target_vector, beta_values):
+    # return the Jacobian
+    jacobian = np.zeros((len(beta_values),len(beta_values)))
+    for row in range(len(beta_values)):
+        for col in range(len(beta_values)):
+            sum_term = 0
+            for conf in range(len(target_vector)):
+                const_term = (np.sum(coefficient_matrix[conf] * beta_values) - target_vector[conf])**2
+                multi = coefficient_matrix[conf][row] * coefficient_matrix[conf][col]
+                sum_term += (2 * multi)/np.sqrt((const_term + 1)) - (4 * multi * const_term)/np.power((const_term + 1),3/2)
+            jacobian[row][col] = sum_term
+            
+    #print(jacobian)
+    return jacobian
+
+def calc_norm_cauchy(matrix, target, values):
+    norm = 0
+    for row in range(len(target)):
+        norm += np.log((np.sum(matrix[row] * values) - target[row])**2 +1)
+    return norm
+
+def calc_norm_arctan(matrix, target, values):
+    norm = 0
+    for row in range(len(target)):
+        norm += np.arctan((np.sum(matrix[row] * values) - target[row])**2)
+    return norm
+
+def calc_absolute_deviation(matrix, target, values):
+    absolute = 0
+    for row in range(len(target)):
+        absolute += np.abs(np.sum(matrix[row] * values) - target[row])
+    return absolute
+
+def newton_raphson(matrix, target, initial, fit_method='cauchy', max_iter=50, tolerance=1e-14):
+    #initial = np.array([4.068553366827293, 2.4012157, 3.4419819, 0.4587839, 0.2616956, 0.3234017])
+    #initial = np.array([4.0321680, 2.4212157, 3.3019819, 0.2587839, 0.216956, -0.])
+    #initial = np.array([1, 1, 1, 1, 1, 1])
+    #print(initial)
+    #print(matrix)
+    #print(target)
+    for _ in range(max_iter):
+        #term_vector = smooth_approx(matrix, target, initial)
+        #jacobian = smooth_approx_derivative(matrix, target, initial)
+        #term_vector = lls(matrix, target, initial)
+        #jacobian = lls_derivative(matrix, target, initial)
+        term_vector = cauchy(matrix, target, initial)
+        jacobian = cauchy_derivative(matrix, target, initial)
+        #term_vector = arctan(matrix, target, initial)
+        #jacobian = arctan_derivative(matrix, target, initial)
+        #term_vector = test_case(matrix, target, initial)
+        #jacobian = test_case_derivative(matrix, target, initial)
+        iter_s = np.linalg.solve(jacobian, term_vector)
+        #print(iter_s)
+        #break
+        current = initial + iter_s
+        
+        initial_norm = calc_norm_cauchy(matrix, target, initial)
+        current_norm = calc_norm_cauchy(matrix, target, current)
+        
+        if current_norm > initial_norm:
+            while current_norm > initial_norm:# and norm_iter < max_iter:
+                norm_ratio = (current_norm/initial_norm)**2
+                iter_s *= (np.sqrt(1 + 6 * norm_ratio) - 1) / (3 * norm_ratio)
+                current = initial + iter_s
+                initial_norm = calc_norm_cauchy(matrix, target, initial)
+                current_norm = calc_norm_cauchy(matrix, target, current)
+        else:
+            pass
+        
+        allWithinTolerance = True
+        for i in range(len(current)):
+            if np.abs(current[i] - initial[i]) > tolerance:
+                allWithinTolerance = False
+                break 
+        initial = current
+        
+        if allWithinTolerance:
+            #print("Converged after {} iterations".format(iter))
+            break
+        
+    return initial
+
+def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicites=list(range(1,7)), baseline_shift=False, method='svd'):
     
     assert len(energies) == len(angles)
     
@@ -83,7 +276,7 @@ def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicit
     # find the  minimum energy
     #min_target = min([energies[x] for x in energies])
     
-    for x in energies:
+    for x in sorted(energies):
         #count += 1
         energy_vector = np.zeros((1,m*t))
         for j in range(m):
@@ -121,7 +314,8 @@ def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicit
         for row in range(len(coefficient_matrix)):
             coefficient_matrix[row][col] -= mean_col
     
-    fit = perform_fit(coefficient_matrix, target_vector, fit_phase)
+    fit = perform_fit(coefficient_matrix, target_vector, fit_phase, fit_method=method)
+    
     
     dict_fit = {}
     for i in range(len(allowed_multiplicites)):
@@ -146,6 +340,12 @@ def energy_at_x(fit, x):
     energy = 0
     for y in fit:
         energy += fit[y]['k']*(np.cos(x*fit[y]['m']*np.pi/180 + fit[y]['delta']*np.pi/180))
+    return energy
+
+def energy_at_x2(fit, x):
+    energy = 0
+    for y in fit:
+        energy += fit[y]['k']*(1 + np.cos(x*fit[y]['m']*np.pi/180 + fit[y]['delta']*np.pi/180))
     return energy
 
 def fit_deviation(energies, angles, fit):
@@ -180,10 +380,10 @@ def multi_pass_lls(energies, angles, limit, allowed_multiplicites=list(range(1,7
     
     
 
-def one_pass_lls(energies, angles, limit=None, phase=False):
+def one_pass_lls(energies, angles, limit=None, phase=False, method='svd'):
     if phase:
         assert isinstance(phase, (list,tuple)) and len(phase) == 2
-    fit = fit_torsion_terms_lls(energies, angles, fit_phase=phase)
+    fit = fit_torsion_terms_lls(energies, angles, fit_phase=phase, method=method)
     
     if limit is not None:
         sorted_list = sorted(fit, key=lambda x:fit[x]['k'], reverse=True)[:limit]
@@ -199,7 +399,11 @@ def prune_data(energies, angles):
     # continue until most variant point is below threshold
     start_len = len(energies)
     while True:
-        fit = one_pass_lls(energies, angles, phase=[0,90])
+        #print(len(energies))
+        mean_energy = np.mean([energies[x] for x in energies])
+        for x in energies:
+            energies[x] -= mean_energy
+        fit = one_pass_lls(energies, angles, phase=[0,90], method='cauchy')
         current_variance = 0
         current_variant_point = -1
         total_variance = []
@@ -209,14 +413,14 @@ def prune_data(energies, angles):
             if variance > current_variance:
                 current_variance = variance
                 current_variant_point = ang
-        mean_variance = np.mean(variance)
-        if current_variance < 1:#*mean_variance:
-            print('removed: ', start_len - len(energies))
+        #mean_variance = np.mean(variance)
+        if current_variance < 5:#*mean_variance:
+            #print('removed: ', start_len - len(energies))
             #print('closing variance: ', current_variant_point, current_variance,mean_variance)
             break
         
         del energies[current_variant_point], angles[current_variant_point]
-        #print('removed data at point ', current_variant_point, current_variance,mean_variance)
+        print('removed data at point ', current_variant_point)
     
     return energies, angles
     
@@ -224,7 +428,23 @@ def prune_data(energies, angles):
 def fit_torsion_terms_fft(energies, *angles):
     pass
 
-def rawminusraw(energiesA, energiesB, anglesA, limit, phase, fh):
+def rmsd_fit_to_raw(energiesQM, energiesMD, anglesQM, anglesMD, fit):
+    fit_raw_energies = {}
+    meanQM = np.mean([energiesQM[x] for x in energiesQM])
+    meanMD = np.mean([energiesMD[x] for x in energiesMD])
+    for i in energiesMD:
+        if i not in energiesQM:
+            continue
+        avg_angle = (anglesQM[i] + anglesMD[i])/2
+        fit_raw_energies[i] = energy_at_x(fit, avg_angle) + energiesMD[i] - meanMD
+    meanFIT = np.mean([fit_raw_energies[x] for x in fit_raw_energies])
+    deviations = []
+    for i in fit_raw_energies:
+        deviations.append((energiesQM[i] - meanQM - fit_raw_energies[i] - meanFIT)**2)
+    rmsd = np.sqrt(np.mean(deviations))
+    return rmsd
+
+def rawminusraw(energiesA, energiesB, anglesA, anglesB, limit, phase, fh):
     diffEnergies, diffAngles = {}, {}
     for i in energiesA:
         if i in energiesB:
@@ -234,6 +454,8 @@ def rawminusraw(energiesA, energiesB, anglesA, limit, phase, fh):
     for term in fit:
         print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
     print("RMSD fit = {:11.7f} \n".format(fit_deviation(diffEnergies, diffAngles, fit)), file=fh)
+    print("RMSD total = {:8.4f}".format(rmsd_fit_to_raw(energiesA, energiesB, 
+                                                                            anglesA, anglesB, fit)))#, file=fh)
     
 def fitminusraw(energiesA, energiesB, anglesA, anglesB, fitset, limit, rawphase, fitphase, fh):
     if fitset == 'A':
@@ -262,7 +484,7 @@ def fitminusraw(energiesA, energiesB, anglesA, anglesB, fitset, limit, rawphase,
             print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
         print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesA, anglesA, fit)), file=fh)
     elif fitset == 'B':
-        print("\nQM Fit:", file=fh)
+        print("\nMD Fit:", file=fh)
         for term in fit:
             print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**fit[term]), file=fh)
         print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesB, anglesB, fit)), file=fh)
@@ -270,6 +492,8 @@ def fitminusraw(energiesA, energiesB, anglesA, anglesB, fitset, limit, rawphase,
     for term in difffit:
         print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**difffit[term]), file=fh)
     print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesDIFF, anglesDIFF, difffit)), file=fh)
+    print("RMSD total = {:8.4f}".format(rmsd_fit_to_raw(energiesA, energiesB, 
+                                                                        anglesA, anglesB, difffit)))#, file=fh)
     
     
     
@@ -296,6 +520,8 @@ def fitminusfit(energiesA, energiesB, anglesA, anglesB, limit, rawphase, fitphas
     for term in difffit:
         print('k{m:<2} = {k:11.7f}, delta{m:<2} = {delta:11.7f}'.format(**difffit[term]), file=fh)
     print("RMSD fit = {:11.7f} \n".format(fit_deviation(energiesDIFF, anglesDIFF, difffit)), file=fh)
+    print("RMSD total = {:8.4f}".format(rmsd_fit_to_raw(energiesA, energiesB, 
+                                                                        anglesA, anglesB, difffit)))#, file=fh)
     
     
 
@@ -309,63 +535,59 @@ def main(f, filePath):
         energiesAA, anglesAA = yaml.load(fh)
     with open(filePath + "energies.ua.txt", 'r') as fh:
         energiesUA, anglesUA = yaml.load(fh)
-    
+        
     print("Non-phased fitting to raw QM - raw AA:", file=f)
-    rawminusraw(energiesQM, energiesAA, anglesQM, 3, False, f)
-    print("Non-phased fitting to raw QM - raw UA:", file=f)
-    rawminusraw(energiesQM, energiesUA, anglesQM, 3, False, f)
+    rawminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 3, False, f)
     print("Phased fitting to raw QM - raw AA:", file=f)
-    rawminusraw(energiesQM, energiesAA, anglesQM, 3, [0,90], f)
-    print("Phased fitting to raw QM - raw UA:", file=f)
-    rawminusraw(energiesQM, energiesUA, anglesQM, 3, [0,90], f)
-    print("===========================================", file=f)
-    
+    rawminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90], f)
     print("Non-phased fitting to raw QM - non-phased AA:", file=f)
     fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, False, f)
-    print("Non-phased fitting to raw QM - non-phased UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, False, f)
-    print("Non-phased fitting to raw QM - phased AA:", file=f)
-    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], False, f)
-    print("Non-phased fitting to raw QM - phased UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], False, f)
     print("Phased fitting to raw QM - non-phased AA:", file=f)
     fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, [0,90], f)
-    print("Phased fitting to raw QM - non-phased UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, [0,90], f)
+    print("Non-phased fitting to raw QM - phased AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], False, f)
     print("Phased fitting to raw QM - phased AA:", file=f)
     fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], [0,90], f)
-    print("Phased fitting to raw QM - phased UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], [0,90], f)
-    print("===========================================", file=f)
-    
     print("Non-phased fitting to non-phased QM - raw AA:", file=f)
-    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, False, f)
-    print("Non-phased fitting to non-phased QM - raw UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, False, f)
-    print("Non-phased fitting to phased QM - raw AA:", file=f)
-    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], False, f)
-    print("Non-phased fitting to phased QM - raw UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], False, f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'A', 3, False, False, f)
     print("Phased fitting to non-phased QM - raw AA:", file=f)
-    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, False, [0,90], f)
-    print("Phased fitting to non-phased QM - raw UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, [0,90], f)
-    print("Phased fitting to phased QM - raw AA:", file=f)
-    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'B', 3, [0,90], [0,90], f)
-    print("Phased fitting to phased QM - raw UA:", file=f)
-    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], [0,90], f)
-    print("===========================================", file=f)
-    
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'A', 3, False, [0,90], f)
     print("Non-phased fitting to non-phased QM - non-phased AA:", file=f)
-    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, False , False, f)   
-    print("Non-phased fitting to non-phased QM - non-phased UA:", file=f)
-    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, False , False, f)    
+    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, False , False, f) 
+    print("Non-phased fitting to phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'A', 3, [0,90], False, f)
+    print("Phased fitting to phased QM - raw AA:", file=f)
+    fitminusraw(energiesQM, energiesAA, anglesQM, anglesAA, 'A', 3, [0,90], [0,90], f)
     print("Non-phased fitting to phased QM - phased AA:", file=f)
-    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90] , False, f)
-    print("Non-phased fitting to phased QM - phased UA:", file=f)
-    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90] , False, f)
+    fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90] , False, f) 
     print("Phased fitting to phased QM - phased AA:", file=f)    
     fitminusfit(energiesQM, energiesAA, anglesQM, anglesAA, 3, [0,90] , [0,90], f)
+    
+    print("\n=======================================\n", file=f)
+    print("Non-phased fitting to raw QM - raw UA:", file=f)
+    rawminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 3, False, f)
+    print("Phased fitting to raw QM - raw UA:", file=f)
+    rawminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90], f)
+    print("Non-phased fitting to raw QM - non-phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, False, f)
+    print("Phased fitting to raw QM - non-phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, False, [0,90], f)
+    print("Non-phased fitting to raw QM - phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], False, f)
+    print("Phased fitting to raw QM - phased UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'B', 3, [0,90], [0,90], f)
+    print("Non-phased fitting to non-phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'A', 3, False, False, f)
+    print("Phased fitting to non-phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'A', 3, False, [0,90], f)
+    print("Non-phased fitting to non-phased QM - non-phased UA:", file=f)
+    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, False , False, f)
+    print("Non-phased fitting to phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'A', 3, [0,90], False, f)
+    print("Phased fitting to phased QM - raw UA:", file=f)
+    fitminusraw(energiesQM, energiesUA, anglesQM, anglesUA, 'A', 3, [0,90], [0,90], f)
+    print("Non-phased fitting to phased QM - phased UA:", file=f)
+    fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90] , False, f)
     print("Phased fitting to phased QM - phased UA:", file=f)    
     fitminusfit(energiesQM, energiesUA, anglesQM, anglesUA, 3, [0,90] , [0,90], f)
     
@@ -441,10 +663,18 @@ def main(f, filePath):
     #    print(fit[i])
     #return rmsds
 
+def main2():
+    with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/Original/METH0/energies.ua.txt', 'r') as fh:
+        energies, angles = yaml.load(fh)
+    energies, angles = prune_data(energies, angles)
+
 if __name__ == '__main__':
     from time import process_time
     import os
+    import sys
     mean_rmsds = [0,0,0,0,0,0]
+    #main2()
+    #sys.exit()
     #iterations = 50000
     #roots = ['30PsiAllFixed', '60PsiBothAllFixed', 'AllHeavyFixed', 'Figures_Pruned', '30PsiBothAllFixed', 
     #         '60PsiOriginal', 'BothAllFixed', 'Figures_Raw', 'Original', 'ThetaAllFixed', '30PsiBothCarbonFixed', 
@@ -452,10 +682,45 @@ if __name__ == '__main__':
     #         'AllCarbonFixed', 'PsiCarbonFixed', '60PsiAllFixed', 'AllFixed']
     roots = ['Original']
     mols = ['AMINO','CHLORO','HYDRO','METH','THIO']
-    types = [-1] #[-1,0,1,2]
+    types = [-1,0,1,2]
     levls = ['aa','ua','qm']
     
     i = 0
+    
+    ks = [4.0, 2.5212157, 3.4019819, 0.2887839, 0.2916956, 0.1534017]
+    deltas = [56.6217515, -55.8958340, 5.9586481, -156.6942762, 47.6905846, 76.4370030]
+    #deltas = [0,0,0,0,0,180]
+    energies, angles = {}, {}
+    for i in range(0,360,5):
+        energies[i] = 0
+        for j in range(len(ks)):
+            energies[i] += float(ks[j]*(1 + np.cos((j+1)*i*np.pi/180 - deltas[j]*np.pi/180)))
+            #break
+        angles[i] = i
+    mean_energy = np.mean([energies[x] for x in energies])
+    for x in energies:
+        energies[x] -= mean_energy
+    energies[90] *= -8
+    energies[20] *= -6
+    
+    svd_fit = one_pass_lls(energies, angles, phase=[0,90])
+    #print(svd_fit)
+    cauchy_fit = fit_torsion_terms_lls(energies, angles, fit_phase=[0,90], method='cauchy')
+    fit_angles, svd_energies, cauchy_energies = [], [], []
+    for i in range(360):
+        fit_angles.append(i)
+        svd_energies.append(energy_at_x(svd_fit, i))
+        cauchy_energies.append(energy_at_x(cauchy_fit, i))
+    
+    from plotting import plot_scatters
+    plot_scatters([{'x':angles, 'y':energies, 'marker':'b.'}, {'x':fit_angles, 'y':svd_energies, 'marker':'b-'}
+                   , {'x':fit_angles, 'y':cauchy_energies, 'marker':'r-'}],
+                   '/Users/iwelsh/Desktop/testthing.png', xlim=(0,360))
+    
+    
+    
+    print(cauchy_fit)
+    sys.exit()
     
     start_time = process_time()
     for r in roots:
@@ -465,6 +730,7 @@ if __name__ == '__main__':
                 file_path = "/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/{}/{}{}/".format(r,m,t)
                 if not os.path.isfile(file_path + 'energies.aa.txt'):
                     continue
+                print('{}{}'.format(m,t))
                 with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/differenceMethods_{}{}.txt'.format(m,t), 'w') as fh:
                     main(fh, file_path)
                 

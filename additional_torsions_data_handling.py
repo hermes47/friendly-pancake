@@ -10,7 +10,7 @@ from vector_math_functions import dihedral_angle, two_pass_lls, one_pass_lls, en
 from gamess_extraction import extract_conformation, extract_energy
 from gromos_extraction import extract_conf, extract_ene
 from plotting import plot_scatters
-from mrsuper.lib import genlib, inlib, outlib, storage
+#from mrsuper.lib import genlib, inlib, outlib, storage
 from numpy import array, mean
 import numpy as np
 
@@ -151,9 +151,9 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                 fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
                 cauchy_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
     
-                #data.append({'x':[x/10 for x in range(3600)],
-                #             'y':[energy_at_x(fit, x/10) for x in range(3600)],
-                #             'marker':'b-'})
+                data.append({'x':[x/10 for x in range(3600)],
+                             'y':[energy_at_x(fit, x/10) for x in range(3600)],
+                             'marker':'b-'})
                 data.append({'x':[x/10 for x in range(3600)],
                              'y':[energy_at_x(cauchy_fit, x/10) for x in range(3600)],
                              'marker':'r-'})
@@ -189,18 +189,33 @@ def plot_energies_all(root, basis_sets, molecules, loaded_data, types, data_set=
                       x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
                       title='Dihedral profile for {mol} under all setups'.format(**forms))
 
-def derivatives(energies, angles, mol):
-    derivatives = []
+def derivatives(energies, angles, mol, root):
+    save_path = '{}/Figures/Derivatives'.format(root)
+    if not os.path.isdir(save_path):
+        os.makedirs(save_path)
+    save_path += "/{}.png".format(mol)
+    derivatives, d_angles = {},{}
+    second_d, second_d_angles = {}, {}
     initial_angle = sorted(angles, key=lambda x:angles[x])[0]
     for ang in sorted(angles, key=lambda x:angles[x])[1:]:
-        derivatives.append((energies[ang] - energies[initial_angle])/(angles[ang] - angles[initial_angle]))
+        derivatives[ang] = (energies[ang] - energies[initial_angle])/(angles[ang] - angles[initial_angle])
+        d_angles[ang] = (angles[ang] + angles[initial_angle]) / 2
+        #while derivatives[ang] > 10:
+        #    derivatives[ang] -= 1.0
+        #while d_angles[ang] < 4:
+        #    d_angles[ang] += 1.0
+        #while d_angles[ang] > 6:
+        #    d_angles[ang] -= 1.0
         initial_angle = ang
-    mean = np.mean(derivatives)
-    median = np.median(derivatives)
-    max = np.max(derivatives)
-    min = np.min(derivatives)
+    initial_angle = sorted(d_angles, key=lambda x:d_angles[x])[0]
+    for ang in sorted(d_angles, key=lambda x:d_angles[x])[1:]:
+        second_d[ang] = (derivatives[ang] - derivatives[initial_angle])/(d_angles[ang] - d_angles[initial_angle])
+        second_d_angles[ang] = (d_angles[ang] + d_angles[initial_angle]) / 2
+        initial_angle = ang
     
-    print(mol, ":", mean, median, max, min)
+    plot_scatters([{'x':d_angles, 'y':derivatives}], save_path, xlim=(0,360),
+                  x_label='Dihedral angle (degrees)', y_label=r'd/dx Potential (kJ mol$^{-1}$)',
+                  title='Derivative of dihedral profile for {}'.format(mol))
         
     
        
@@ -222,8 +237,8 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
                     energies, angles = yaml.load(fh)
                 #print(m, t)
                 #if t == 'ua' and m in ['METH0','METH-1']:
-                derivatives(energies, angles, m + t)
-                energies, angles = prune_data(energies, angles)
+                derivatives(energies, angles, m + '-' + t, root)
+                #energies, angles = prune_data(energies, angles)
                 mean_energy = mean([energies[x] for x in energies])
                 for x in energies:
                     energies[x] -= mean_energy
@@ -247,7 +262,7 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # plot all setups on one figure
     #plot_energies_all(root, basis_sets, molecules, loaded_data, types)
     # plot any selected groups of figures
-    #plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
+    plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
     
 def generate_new_qm_jobs(root, mols, descrips):
     #############################

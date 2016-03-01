@@ -151,9 +151,9 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                 fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
                 cauchy_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
     
-                data.append({'x':[x/10 for x in range(3600)],
-                             'y':[energy_at_x(fit, x/10) for x in range(3600)],
-                             'marker':'b-'})
+                #data.append({'x':[x/10 for x in range(3600)],
+                #             'y':[energy_at_x(fit, x/10) for x in range(3600)],
+                #             'marker':'b-'})
                 data.append({'x':[x/10 for x in range(3600)],
                              'y':[energy_at_x(cauchy_fit, x/10) for x in range(3600)],
                              'marker':'r-'})
@@ -223,7 +223,7 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
                 #print(m, t)
                 #if t == 'ua' and m in ['METH0','METH-1']:
                 derivatives(energies, angles, m + t)
-                #energies, angles = prune_data(energies, angles)
+                energies, angles = prune_data(energies, angles)
                 mean_energy = mean([energies[x] for x in energies])
                 for x in energies:
                     energies[x] -= mean_energy
@@ -247,7 +247,7 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # plot all setups on one figure
     #plot_energies_all(root, basis_sets, molecules, loaded_data, types)
     # plot any selected groups of figures
-    plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
+    #plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
     
 def generate_new_qm_jobs(root, mols, descrips):
     #############################

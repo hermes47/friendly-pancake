@@ -1,11 +1,3 @@
-'''
-Functions for plotting graphs of data
-
-Created on 14/01/2016
-
-@author: iwelsh
-'''
-
 import matplotlib.pyplot as plt
 import os
 
@@ -25,7 +17,6 @@ def plot_scatters(data, save_path, default_point='.', show_legend=True, xlim=Non
         save_path += '.'+file_out
     if not os.path.isdir('/'.join(save_path.split('/')[:-1])):
         os.makedirs('/'.join(save_path.split('/')[:-1]))
-    #fig = plt.figure()
     ax = plt.subplot(111)
     # plot all the data
     for d_set in data:
@@ -48,36 +39,12 @@ def plot_scatters(data, save_path, default_point='.', show_legend=True, xlim=Non
     if show_legend:
         box = ax.get_position()
         ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
-        plt.legend(loc=8, fontsize='xx-small', numpoints=1, mode='expand',
-                   bbox_to_anchor=(0, 0.02, 1, 0.02), ncol=5)
+        plt.legend(loc='upper center', fontsize='xx-small', numpoints=1,
+                   bbox_to_anchor=(0.5, -0.12), ncol=5)
     plt.savefig(save_path, format=file_out, papertype='a4')
     plt.close()
 
-    
-        
-
 def main():
-    import yaml
-    import random
-    save_path = '/Users/iwelsh/Documents/DataTest.png'
-    
-    with open('/Users/iwelsh/Documents/rawfixeddata.txt','r') as fh:
-        y_data, x_data, fit_y, fit_x = yaml.load(fh)
-    for i in y_data:
-        y_data[i] += random.uniform(-0.1,0.1)
-    for i in range(90,136,5):
-        if i % 2:
-            y_data[i] -= 1 #+ random.uniform(-0.2,0.2)
-        else:
-            y_data[i] += 1 #+ random.uniform(-0.2,0.2)
-    #x_data = [1,2,3,4,5,6,7,8,9,10]
-    #y_data = [1,4,9,16,25,36,49,64,81,100]
-    data = [{'x':x_data,'y':y_data,'marker':'b.'}, {'x':fit_x, 'y':fit_y, 'marker':'b-'}]
-    x_label = r'$x$'
-    y_label = r'$y$'
-    title = 'y = f(x)'
-    plot_scatters(data, save_path, show_legend=False, x_label=x_label, y_label=y_label, title=title, file_out='png',
-                  xlim=(0,360))
-
+    pass
 if __name__ == '__main__':
     main()

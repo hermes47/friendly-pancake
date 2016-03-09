@@ -45,6 +45,15 @@ def plot_scatters(data, save_path, default_point='.', show_legend=True, xlim=Non
     plt.close()
 
 def main():
+    with open('/Volumes/DataStore/DPPE/SR_RF/Q1/LJ1/watermassdensity.xvg','r') as fh:
+        file = fh.readlines()
+    x = []
+    y = []
+    for i in file:
+        dat = list(map(float,i.split()))
+        x.append(dat[0])
+        y.append(dat[1])
+    plot_scatters([{'x':x,'y':y,'marker':'-'}], '/Volumes/DataStore/DPPE/SR_RF/Q1/LJ1/plot.png')
     pass
 if __name__ == '__main__':
     main()

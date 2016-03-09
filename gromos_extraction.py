@@ -10,8 +10,10 @@ def extract_conf(loaded_file, key='int'):
     conf = {}
     if string not in loaded_file:
         conf = None
-    else:
+    elif loaded_file[loaded_file.index(string) + 1].startswith('#'):
         start_line = loaded_file.index(string) + 2
+    else:
+        start_line = loaded_file.index(string) + 1
     count = 0
     while conf is not None and loaded_file[start_line+count] != 'END\n':
         line_data = loaded_file[start_line + count].split()

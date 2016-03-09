@@ -6,11 +6,11 @@ Created on 14/01/2016
 import os
 import yaml
 
-from vector_math_functions import dihedral_angle, two_pass_lls, one_pass_lls, energy_at_x, prune_data, fit_deviation
+from vector_math_functions import * #dihedral_angle, two_pass_lls, one_pass_lls, energy_at_x, prune_data, fit_deviation, derivative
 from gamess_extraction import extract_conformation, extract_energy
 from gromos_extraction import extract_conf, extract_ene
 from plotting import plot_scatters
-#from mrsuper.lib import genlib, inlib, outlib, storage
+from mrsuper.lib import genlib, inlib, outlib, storage
 from numpy import array, mean
 import numpy as np
 
@@ -69,6 +69,7 @@ def extract_energies_md(root, descriptors, molecules, angles_to_measure):
             for m in molecules:
                 energies, angles = {}, {}
                 shifts = angles_to_measure[molecules.index(m)][t]
+                rmsds = {}
                 formatting = dict(root=root,
                                   des=d,
                                   mol=m,
@@ -94,15 +95,22 @@ def extract_energies_md(root, descriptors, molecules, angles_to_measure):
                     try:
                         with open('{root}/{des}/{mol}/MD_data/{mol}.{angle:03}.{type}.min.{c}.cnf'.format(**formatting),'r') as fh:
                             coord_file = fh.readlines()
+                        with open('{root}/{des}/{mol}/MD_data/{mol}.{angle:03}.{type}.cnf'.format(**formatting),'r') as fh:
+                            init_coord_file = fh.readlines()
                     except FileNotFoundError:
                         try:
                             with open('{root}/{des}/{mol}/MD_data/{mol}.{angle2:03}.{type}.min.{c}.cnf'.format(**formatting),'r') as fh:
                                 coord_file = fh.readlines()
+                            with open('{root}/{des}/{mol}/MD_data/{mol}.{angle2:03}.{type}.cnf'.format(**formatting),'r') as fh:
+                                init_coord_file = fh.readlines()
                         except FileNotFoundError:
                             continue
                     conf = extract_conf(coord_file)
+                    init_conf = extract_conf(init_coord_file)
                     if conf is None:
                         continue
+                    if init_conf is not None:
+                        rmsds[a] = aligned_rmsd(conf, init_conf)
                     energies[a] = extract_ene(energy_file)
                     angles[a] = dihedral_angle(conf[shifts[0]]['vec'], conf[shifts[1]]['vec'],
                                                conf[shifts[2]]['vec'], conf[shifts[3]]['vec'], scale='deg')
@@ -120,14 +128,16 @@ def extract_energies_md(root, descriptors, molecules, angles_to_measure):
                     energies[i] -= z_energy
                 with open('{root}/{des}/{mol}/energies.{type}.txt'.format(**formatting), 'w') as fh:
                     yaml.dump([energies, angles],fh)
-                with open('{root}/{des}/{mol}/fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
-                    yaml.dump(two_pass_lls(energies, angles, 3, phase=False), fh)
-                with open('{root}/{des}/{mol}/phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
-                    yaml.dump(two_pass_lls(energies, angles, 3, phase=[0,90]), fh)
-                with open('{root}/{des}/{mol}/onepass_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
-                    yaml.dump(one_pass_lls(energies, angles, phase=False), fh)
-                with open('{root}/{des}/{mol}/onepass_phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
-                    yaml.dump(one_pass_lls(energies, angles, phase=[0,90]), fh)
+                with open('{root}/{des}/{mol}/rmsd.{type}.txt'.format(**formatting), 'w') as fh:
+                    yaml.dump(rmsds,fh)
+                #with open('{root}/{des}/{mol}/fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                #    yaml.dump(two_pass_lls(energies, angles, 3, phase=False), fh)
+                #with open('{root}/{des}/{mol}/phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                #    yaml.dump(two_pass_lls(energies, angles, 3, phase=[0,90]), fh)
+                #with open('{root}/{des}/{mol}/onepass_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                #    yaml.dump(one_pass_lls(energies, angles, phase=False), fh)
+                #with open('{root}/{des}/{mol}/onepass_phased_fitted_curve.{type}.txt'.format(**formatting),'w') as fh:
+                #    yaml.dump(one_pass_lls(energies, angles, phase=[0,90]), fh)
 
 def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
     for t in types:
@@ -139,6 +149,8 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                     continue
                 if t not in loaded_data[m][d]:
                     continue
+                #if t in ["aa",'qm']:
+                #    continue
                 data = [{'x':loaded_data[m][d][t][1],
                          'y':loaded_data[m][d][t][0],
                          'marker':'b.'}]
@@ -147,19 +159,30 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                     save_path = '{root}/Figures/{mol}/{basis}.png'.format(**forms)
                 else:
                     save_path = '{root}/Figures/{mol}/{basis}.{t}.png'.format(**forms)
-                    
+                #print(t)
                 fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90])
-                cauchy_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
-    
-                data.append({'x':[x/10 for x in range(3600)],
+                cauchy_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy', printme=False)
+                fit_data = {'x':[x/10 for x in range(3600)],
                              'y':[energy_at_x(fit, x/10) for x in range(3600)],
-                             'marker':'b-'})
+                             'marker':'b-'}
+                #mean_fit = mean(fit_data['y'])
+                #print('mean', mean_fit)
+                #for x in fit_data['y']:
+                #    x -= mean_fit
+                data.append(fit_data)
                 data.append({'x':[x/10 for x in range(3600)],
                              'y':[energy_at_x(cauchy_fit, x/10) for x in range(3600)],
                              'marker':'r-'})
                 plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
                       x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
                       title='Dihedral profile for {mol} under {basis}'.format(**forms))
+                if t == 'aa' and m == 'HYDRO2':
+                    error_term = error_lls = 0
+                    for x in loaded_data[m][d][t][1]:
+                        error_term += np.log(1 + (energy_at_x(cauchy_fit, loaded_data[m][d][t][1][x]) - loaded_data[m][d][t][0][x])**2)
+                        error_lls += (energy_at_x(fit, loaded_data[m][d][t][1][x]) - loaded_data[m][d][t][0][x])**2
+                    print('Error:', error_term, error_lls)
+                #print(t, cauchy_fit)
                 
 def plot_energies_all(root, basis_sets, molecules, loaded_data, types, data_set='Combined'):
     for m in molecules:
@@ -194,30 +217,60 @@ def derivatives(energies, angles, mol, root):
     if not os.path.isdir(save_path):
         os.makedirs(save_path)
     save_path += "/{}.png".format(mol)
-    derivatives, d_angles = {},{}
-    second_d, second_d_angles = {}, {}
-    initial_angle = sorted(angles, key=lambda x:angles[x])[0]
-    for ang in sorted(angles, key=lambda x:angles[x])[1:]:
-        derivatives[ang] = (energies[ang] - energies[initial_angle])/(angles[ang] - angles[initial_angle])
-        d_angles[ang] = (angles[ang] + angles[initial_angle]) / 2
-        #while derivatives[ang] > 10:
-        #    derivatives[ang] -= 1.0
-        #while d_angles[ang] < 4:
-        #    d_angles[ang] += 1.0
-        #while d_angles[ang] > 6:
-        #    d_angles[ang] -= 1.0
-        initial_angle = ang
-    initial_angle = sorted(d_angles, key=lambda x:d_angles[x])[0]
-    for ang in sorted(d_angles, key=lambda x:d_angles[x])[1:]:
-        second_d[ang] = (derivatives[ang] - derivatives[initial_angle])/(d_angles[ang] - d_angles[initial_angle])
-        second_d_angles[ang] = (d_angles[ang] + d_angles[initial_angle]) / 2
-        initial_angle = ang
+    derivatives, d_angles = derivative(energies, angles)
+    mean = np.mean([derivatives[x] for x in derivatives])
+    std = np.std([derivatives[x] for x in derivatives])
     
-    plot_scatters([{'x':d_angles, 'y':derivatives}], save_path, xlim=(0,360),
+    # determine if there exists a 10% length with all within xsd of mean
+    at_least_1_within = False
+    for i in range(len(derivatives)):
+        all_within_x = True
+        step_count = 0
+        for j in cycle_iterator(i, list(sorted(derivatives))):
+            step_count += 1
+            if np.abs(derivatives[j]) > mean + 1*std:
+                all_within_x = False
+                break
+            if step_count >= 0.1*len(derivatives):
+                break
+        if all_within_x:
+            at_least_1_within = True
+            break
+    if not at_least_1_within:
+        print("Not a series of 10 points within 1 sd of mean")
+            
+        
+            
+    
+    
+    data = [{'x':d_angles, 'y':dict(zip([x for x in sorted(derivatives)],[np.abs(derivatives[x]) for x in sorted(derivatives)])), 'marker':'b.'}]
+    data.append({'x':[-1,361], 'y':[mean + std, mean + std], 'marker':'r--'}) # plus 1 sd
+    data.append({'x':[-1,361], 'y':[mean + 2*std, mean + 2*std], 'marker':'g--'}) # pls 2 sd
+    #data.append({'x':[-1,361], 'y':[mean-std, mean-std], 'marker':'r--'}) # min 1 sd
+    #data.append({'x':[-1,361], 'y':[mean-2*std, mean-2*std], 'marker':'g--'}) # min 2 sd
+    #data.append({'x':[-1,361], 'y':[mean-3*std, mean-3*std], 'marker':'b--'}) # min 3 sd
+    data.append({'x':[-1,361], 'y':[mean+3*std, mean+3*std], 'marker':'b--'}) # plus 3 sd
+    data.append({'x':[-1,361], 'y':[mean, mean], 'marker':'k--'}) # mean
+    #initial_angle = sorted(d_angles, key=lambda x:d_angles[x])[0]
+    #for ang in sorted(d_angles, key=lambda x:d_angles[x])[1:]:
+    #    second_d[ang] = (derivatives[ang] - derivatives[initial_angle])/(d_angles[ang] - d_angles[initial_angle])
+    #    second_d_angles[ang] = (d_angles[ang] + d_angles[initial_angle]) / 2
+    #    initial_angle = ang
+    
+    plot_scatters(data, save_path, xlim=(0,360),
                   x_label='Dihedral angle (degrees)', y_label=r'd/dx Potential (kJ mol$^{-1}$)',
                   title='Derivative of dihedral profile for {}'.format(mol))
         
-    
+def safe_prune(energies, angles, tol=1.5):
+    to_remove = []
+    for ang in angles:
+        if not ang - tol < angles[ang] < ang + tol:
+            to_remove.append(ang) 
+    for ang in to_remove:
+        print("Removing point at", ang)
+        del angles[ang], energies[ang]
+        
+    return energies, angles
        
 def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # load all data
@@ -235,10 +288,13 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
                     continue
                 with open('{root}/{basis}/{mol}/energies.{type}.txt'.format(**formatting), 'r') as fh:
                     energies, angles = yaml.load(fh)
-                #print(m, t)
+                print(m, t)
+                #if t != 'aa':
+                #    continue
                 #if t == 'ua' and m in ['METH0','METH-1']:
                 derivatives(energies, angles, m + '-' + t, root)
-                #energies, angles = prune_data(energies, angles)
+                #energies, angles = safe_prune(energies, angles)
+                #derivatives(energies, angles, m + '-' + t + '-Pruned', root)
                 mean_energy = mean([energies[x] for x in energies])
                 for x in energies:
                     energies[x] -= mean_energy
@@ -262,7 +318,7 @@ def process_data(root, basis_sets, molecules, types=['qm', 'aa', 'ua']):
     # plot all setups on one figure
     #plot_energies_all(root, basis_sets, molecules, loaded_data, types)
     # plot any selected groups of figures
-    plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
+    #plot_fitted_comparisons(root, molecules, basis_sets, loaded_data, types)
     
 def generate_new_qm_jobs(root, mols, descrips):
     #############################
@@ -473,7 +529,7 @@ def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
                 save_path = '{root}/Figures/{mol}/{des}_Fitting.{type}.png'.format(**forms)
                 plotting_data = [{'x':loaded_data[m][d]['qm'][1],
                                   'y':loaded_data[m][d]['qm'][0],
-                                  'marker':'bo',
+                                  'marker':'b.',
                                   'label':'QM raw'}]
                 
                 md_fit = one_pass_lls(loaded_data[m][d][t][0], loaded_data[m][d][t][1], phase=[0,90], method='cauchy')
@@ -504,7 +560,7 @@ def plot_fitted_comparisons(root, molecules, descriptors, loaded_data, types):
                 
                 plotting_data.append({'x':loaded_data[m][d][t][1],
                                       'y':loaded_data[m][d][t][0],
-                                      'marker':'ro',
+                                      'marker':'r.',
                                       'label':t.upper() + ' raw'})
                 plot_scatters(plotting_data, save_path, show_legend=False, xlim=(0,360),
                           x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
@@ -727,18 +783,18 @@ def run_md_jobs(root, mols, descrips):
                     atm_c = aa_work_mol.atom(molecules[m][des]['aa'][2]).xyz
                     atm_d = aa_work_mol.atom(molecules[m][des]['aa'][3]).xyz
                     ang = dihedral_angle(atm_a,atm_b,atm_c,atm_d,scale='deg')
-                    angs_aa.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0'.format(ang, *molecules[m][des]['aa']))
-                    angs_ua.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0'.format(ang, *molecules[m][des]['ua']))
+                    angs_aa.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.001'.format(ang, *molecules[m][des]['aa']))
+                    angs_ua.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.001'.format(ang, *molecules[m][des]['ua']))
                 with open('{outdir}/{mol}.{ang:03}.aa.constraints.dat'.format(**forms), 'w') as fh:
                     fh.write(constraint_temp.format(**{'constraints':'\n'.join(angs_aa)}))
                 with open('{outdir}/{mol}.{ang:03}.ua.constraints.dat'.format(**forms), 'w') as fh:
                     fh.write(constraint_temp.format(**{'constraints':'\n'.join(angs_ua)}))
                 # first pass
-                os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.aa.top @conf {outdir}/{mol}.{ang:03}.aa.cnf '
+                os.system(('/opt/local/gromosXX-1773/bin/md @topo {outdir}/{mol}.aa.top @conf {outdir}/{mol}.{ang:03}.aa.cnf '
                            '@input {outdir}/{mol}.aa.1.imd @fin {outdir}/{mol}.{ang:03}.aa.min.1.cnf @develop '
                            '@dihrest {outdir}/{mol}.{ang:03}.aa.constraints.dat > {outdir}/{mol}.{ang:03}.aa.1.log'.format(**forms) ))
                 
-                os.system(('/usr/local/md++/bin/md @topo {outdir}/{mol}.ua.top @conf {outdir}/{mol}.{ang:03}.ua.cnf '
+                os.system(('/opt/local/gromosXX-1773/bin/md @topo {outdir}/{mol}.ua.top @conf {outdir}/{mol}.{ang:03}.ua.cnf '
                            '@input {outdir}/{mol}.ua.1.imd @fin {outdir}/{mol}.{ang:03}.ua.min.1.cnf @develop '
                            '@dihrest {outdir}/{mol}.{ang:03}.ua.constraints.dat > {outdir}/{mol}.{ang:03}.ua.1.log'.format(**forms) ))
                 ## second pass
@@ -802,13 +858,16 @@ def main():
     
     
     #generate_new_qm_jobs(root, ['METH-1'], ['Original'])
-    #run_md_jobs(root, qm_mols, ['Original'])
+    run_md_jobs(root, qm_mols, ['Original'])
     md_mols = [x for x in mols if 'aa' in mols[x] and 'ua' in mols[x]]
+    #md_mols = ['AMINO0']
     md_angles = [mols[x] for x in md_mols]
     #extract_energies_md(root, ['Original'], md_mols, md_angles)
+    extract_energies_md(root, ['Original'], md_mols, md_angles)
     #extract_energies_md(root, descriptors, md_mols, md_angles)
     #process_data(root, ['Original'], ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1'])
     process_data(root, ['Original'], all_mols)
+    #process_data(root, ['Original'], ['AMINO1'])
     #process_data(root, descriptors, all_mols)
     
 if __name__ == '__main__':

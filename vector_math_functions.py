@@ -37,7 +37,38 @@ def dihedral_angle(a, b, c, d, period=[0,2*np.pi], scale='rad'):
             phi -= 360
     return float(phi)
 
-def perform_fit(matrix, target, fit_phase, fit_method='svd'):
+def aligned_rmsd(coordinates_A, coordinates_B):
+    def dict_to_array(coordinates):
+        A = []
+        for atm in sorted(coordinates):
+            A.append(np.asarray(coordinates[atm]['vec']))
+        return np.asarray(A)
+    
+    def kabsch_alignment(A, B):
+        covariance = np.dot(np.transpose(A), B)
+        U, S, V = np.linalg.svd(covariance)
+        # correct for right-handed coordinate system
+        if (np.linalg.det(U) * np.linalg.det(V) < 0.0):
+            S[-1] = -S[-1]
+            U[:, -1] = -U[:, -1]
+        # calc the rotation matrix
+        rot_mat = np.dot(U,V)
+        return rot_mat
+    # convert dict input to a matrix type thingy
+    mat_A = dict_to_array(coordinates_A)
+    mat_B = dict_to_array(coordinates_B)
+    # centre both coordinate sets on 0,0,0
+    mat_A -= sum(mat_A)/len(mat_A)
+    mat_B -= sum(mat_B)/len(mat_B)
+    # apply rotation to A to minimise RMSD
+    mat_A = np.dot(mat_A, kabsch_alignment(mat_A, mat_B))
+    # calculate the RMSD
+    rmsd = 0.
+    for a, b in zip(mat_A, mat_B):
+        rmsd += sum([(a[i] - b[i])**2 for i in range(len(a))])
+    return float(np.sqrt(rmsd/len(mat_A)))
+
+def perform_fit(matrix, target, fit_phase, fit_method='svd', printme=False):
     if fit_method == 'qr':
         q,r = np.linalg.qr(matrix)
         d = np.dot(np.transpose(q),target)
@@ -49,7 +80,8 @@ def perform_fit(matrix, target, fit_phase, fit_method='svd'):
         x = newton_raphson(matrix, target, initial_values)
     
     
-        
+    if printme:
+        print(x)
     fit = []
     if not fit_phase:
         for k in x:
@@ -213,7 +245,9 @@ def calc_absolute_deviation(matrix, target, values):
 def newton_raphson(matrix, target, initial, fit_method='cauchy', max_iter=50, tolerance=1e-14):
     #initial = np.array([4.068553366827293, 2.4012157, 3.4419819, 0.4587839, 0.2616956, 0.3234017])
     #initial = np.array([4.0321680, 2.4212157, 3.3019819, 0.2587839, 0.216956, -0.])
-    #initial = np.array([1, 1, 1, 1, 1, 1])
+    #initial = np.array([-1.63771227, -4.06120612,  3.70036194,  4.00151597,  2.64167739, -1.66428148,
+    #                     0.02128043, -0.92143359, -0.1749524,   0.62808971,  0.20873093, -0.37133858])
+    
     #print(initial)
     #print(matrix)
     #print(target)
@@ -237,14 +271,27 @@ def newton_raphson(matrix, target, initial, fit_method='cauchy', max_iter=50, to
         current_norm = calc_norm_cauchy(matrix, target, current)
         
         if current_norm > initial_norm:
+            # scale the step size down until it does decrease the target function
             while current_norm > initial_norm:# and norm_iter < max_iter:
                 norm_ratio = (current_norm/initial_norm)**2
                 iter_s *= (np.sqrt(1 + 6 * norm_ratio) - 1) / (3 * norm_ratio)
                 current = initial + iter_s
                 initial_norm = calc_norm_cauchy(matrix, target, initial)
                 current_norm = calc_norm_cauchy(matrix, target, current)
-        else:
-            pass
+        #elif current_norm < initial_norm:
+        #    previous_iter = iter_s
+        #    print('scaling up')
+        #    # scale the step size up until it no longer decreases the target function
+        #    while current_norm < initial_norm:
+        #        previous_iter = iter_s
+        #        norm_ratio = (current_norm/initial_norm)**2
+        #        iter_s /= (np.sqrt(1 + 6 * norm_ratio) - 1) / (3 * norm_ratio)
+        #        current = initial + iter_s
+        #        initial_norm = calc_norm_cauchy(matrix, target, initial)
+        #        current_norm = calc_norm_cauchy(matrix, target, current)
+        #        
+        #    current = initial + previous_iter
+                
         
         allWithinTolerance = True
         for i in range(len(current)):
@@ -259,7 +306,7 @@ def newton_raphson(matrix, target, initial, fit_method='cauchy', max_iter=50, to
         
     return initial
 
-def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicites=list(range(1,7)), baseline_shift=False, method='svd'):
+def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicites=list(range(1,7)), printme=False, method='svd'):
     
     assert len(energies) == len(angles)
     
@@ -299,11 +346,7 @@ def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicit
     coefficient_matrix = coefficient_matrix[1:]
     target_vector = target_vector[1:]
     
-    # V_{i} - c^{V}, c^{V} = mean(sum of V_i)
-    if baseline_shift:
-        target_vector -= np.mean(target_vector)
-    else:
-        target_vector -= np.mean(target_vector)
+    target_vector -= np.mean(target_vector)
         
     # subtract the mean of cos(mi\thetaj) from each value of coefficient_matrix
     for col in range(len(coefficient_matrix[0])):
@@ -314,7 +357,7 @@ def fit_torsion_terms_lls(energies, angles, fit_phase=False, allowed_multiplicit
         for row in range(len(coefficient_matrix)):
             coefficient_matrix[row][col] -= mean_col
     
-    fit = perform_fit(coefficient_matrix, target_vector, fit_phase, fit_method=method)
+    fit = perform_fit(coefficient_matrix, target_vector, fit_phase, fit_method=method, printme=printme)
     
     
     dict_fit = {}
@@ -380,10 +423,10 @@ def multi_pass_lls(energies, angles, limit, allowed_multiplicites=list(range(1,7
     
     
 
-def one_pass_lls(energies, angles, limit=None, phase=False, method='svd'):
+def one_pass_lls(energies, angles, limit=None, phase=False, method='svd', printme=False):
     if phase:
         assert isinstance(phase, (list,tuple)) and len(phase) == 2
-    fit = fit_torsion_terms_lls(energies, angles, fit_phase=phase, method=method)
+    fit = fit_torsion_terms_lls(energies, angles, fit_phase=phase, method=method, printme=printme)
     
     if limit is not None:
         sorted_list = sorted(fit, key=lambda x:fit[x]['k'], reverse=True)[:limit]
@@ -391,15 +434,15 @@ def one_pass_lls(energies, angles, limit=None, phase=False, method='svd'):
             del fit[k]
     return fit
     
-def prune_data(energies, angles):
+def prune_data(energies, angles, method='fit'): # method can be fit or derivative
     # prune the data to remove outliers.
     # perform a phased, one_pass_lls fit using all points
     # calculate the variance between each point and it's fitted value to find the most variant points
     # if the most variant point is above some threshold, remove it and refit
     # continue until most variant point is below threshold
     start_len = len(energies)
-    while True:
-        #print(len(energies))
+    remove_count = 0
+    while True and method == 'fit' and remove_count < 0.25*start_len:
         mean_energy = np.mean([energies[x] for x in energies])
         for x in energies:
             energies[x] -= mean_energy
@@ -413,20 +456,27 @@ def prune_data(energies, angles):
             if variance > current_variance:
                 current_variance = variance
                 current_variant_point = ang
-        #mean_variance = np.mean(variance)
-        if current_variance < 5:#*mean_variance:
-            #print('removed: ', start_len - len(energies))
-            #print('closing variance: ', current_variant_point, current_variance,mean_variance)
+        if current_variance < 5:
             break
-        
         del energies[current_variant_point], angles[current_variant_point]
-        print('removed data at point ', current_variant_point)
+        remove_count += 1
+        #print('removed data at point ', current_variant_point)
+        
+    
+    while True and method == 'derivative' and remove_count < 0.25*start_len:
+        derivatives, d_angles = derivative(energies, angles)
+        d_mean = np.mean([derivatives[x] for x in derivatives])
+        d_std = np.std([derivatives[x] for x in derivatives])
+        #print(sorted(derivatives, key=lambda x: derivatives[x])[-1],sorted(derivatives, key=lambda x: derivatives[x])[0])
+        largest_d = sorted(derivatives, key=lambda x: derivatives[x])[-1]
+        if derivatives[largest_d] < d_mean + 3 * d_std:
+            break
+        del energies[largest_d], angles[largest_d]
+        remove_count += 1
+        print('removed data at point ', largest_d)
+        
     
     return energies, angles
-    
-
-def fit_torsion_terms_fft(energies, *angles):
-    pass
 
 def rmsd_fit_to_raw(energiesQM, energiesMD, anglesQM, anglesMD, fit):
     fit_raw_energies = {}
@@ -667,6 +717,36 @@ def main2():
     with open('/Users/iwelsh/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions/Original/METH0/energies.ua.txt', 'r') as fh:
         energies, angles = yaml.load(fh)
     energies, angles = prune_data(energies, angles)
+
+def derivative(energies, angles):
+    derivatives, d_angles = {},{}
+    sorted_derivs = sorted(angles, key=lambda x:angles[x])
+
+    for i in range(len(sorted_derivs)):
+        ang = sorted_derivs[i]
+        lead_ang = sorted_derivs[i-1]
+        try:
+            trail_ang = sorted_derivs[i+1]
+        except IndexError:
+            trail_ang = sorted_derivs[0]
+        
+        lead_diff = min((np.abs(angles[ang] - angles[lead_ang]),np.abs(angles[ang] - angles[lead_ang] + 360)))
+        trail_diff = min((np.abs(angles[ang] - angles[trail_ang]),np.abs(angles[ang] - angles[trail_ang] - 360)))
+        if lead_diff > 90:
+            print('lead', ang, lead_ang, lead_diff)
+        if trail_diff > 90:
+            print('trail', ang, lead_ang, trail_diff)
+        derivatives[5*i] = (energies[ang] - energies[lead_ang])/(lead_diff)
+                            
+        d_angles[5*i] = ang
+    return derivatives, d_angles
+
+def cycle_iterator(start_idx, d_list):
+    for i in range(len(d_list)):
+        idx = i + start_idx
+        if idx >= len(d_list):
+            idx -= len(d_list)
+        yield d_list[idx]
 
 if __name__ == '__main__':
     from time import process_time

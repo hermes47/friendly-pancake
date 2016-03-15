@@ -17,12 +17,16 @@ def extract_energy(loaded_file, scale=2625.5):
         energy = float(ene_line.split()[3])*scale
     return energy
 
-def extract_conformation(loaded_file, scale=1, key='int'): # or key='name'
+def extract_conformation(loaded_file, scale=1, key='int', optimised=True): # or key='name'
     """
     Extracts the minimised conformation from a GAMESS optimisation log file
     """
-    string = '      ***** EQUILIBRIUM GEOMETRY LOCATED *****\n'
-    backup_string = 'BEGINNING GEOMETRY SEARCH POINT NSERCH=   0 ...\n'
+    if optimised:
+        string = '      ***** EQUILIBRIUM GEOMETRY LOCATED *****\n'
+        backup_string = ' BEGINNING GEOMETRY SEARCH POINT NSERCH=   0 ...\n'
+    else:
+        string = 'F      ***** EQUILIBRIUM GEOMETRY LOCATED *****\n'
+        backup_string = ' BEGINNING GEOMETRY SEARCH POINT NSERCH=   0 ...\n'
     conf = {}
     if string not in loaded_file and backup_string not in loaded_file:
         conf = None

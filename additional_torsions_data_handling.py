@@ -175,7 +175,7 @@ def plot_energies_individual(root, molecules, basis_sets, loaded_data, types):
                              'marker':'r-'})
                 plot_scatters(data, save_path, show_legend=False, xlim=(0,360), 
                       x_label='Dihedral angle (degrees)', y_label=r'Potential (kJ mol$^{-1}$)', 
-                      title='Dihedral profile for {mol} under {basis}'.format(**forms))
+                      title='Dihedral profile for {mol} under {t}'.format(**forms))
                 if t == 'aa' and m == 'HYDRO2':
                     error_term = error_lls = 0
                     for x in loaded_data[m][d][t][1]:
@@ -750,10 +750,10 @@ def run_md_jobs(root, mols, descrips):
                 forms['ang'] = a
                 try:
                     with open('{root}/{des}/{mol}/{mol}.{ang:03}.log'.format(**forms), 'r') as fh:
-                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')
+                        gamess = extract_conformation(fh.readlines(), scale=1, key='name', optimised=False)
                 except FileNotFoundError:
                     with open('{root}/{des}/{mol}/{mol}.{ang2:03}.log'.format(**forms), 'r') as fh:
-                        gamess = extract_conformation(fh.readlines(), scale=1, key='name')     
+                        gamess = extract_conformation(fh.readlines(), scale=1, key='name', optimised=False)     
                 for atm in aa_work_mol.atoms:
                     try:
                         atm.xyz = gamess[atm.atm_name.upper()]['vec']
@@ -772,10 +772,10 @@ def run_md_jobs(root, mols, descrips):
                     fh.write(outlib.print_gromos_cnf(aa_work_mol))
                 with open('{outdir}/{mol}.{ang:03}.ua.cnf'.format(**forms), 'w') as fh:
                     fh.write(outlib.print_gromos_cnf(ua_work_mol))
-                with open('{outdir}/{mol}.{ang:03}.aa.pdb'.format(**forms), 'w') as fh:
-                    fh.write(outlib.print_pdb(aa_work_mol))
-                with open('{outdir}/{mol}.{ang:03}.ua.pdb'.format(**forms), 'w') as fh:
-                    fh.write(outlib.print_pdb(ua_work_mol))
+                #with open('{outdir}/{mol}.{ang:03}.aa.pdb'.format(**forms), 'w') as fh:
+                #    fh.write(outlib.print_pdb(aa_work_mol))
+                #with open('{outdir}/{mol}.{ang:03}.ua.pdb'.format(**forms), 'w') as fh:
+                #    fh.write(outlib.print_pdb(ua_work_mol))
                 angs_aa, angs_ua = [], []
                 for des in descriptors[d]:
                     atm_a = aa_work_mol.atom(molecules[m][des]['aa'][0]).xyz
@@ -783,8 +783,8 @@ def run_md_jobs(root, mols, descrips):
                     atm_c = aa_work_mol.atom(molecules[m][des]['aa'][2]).xyz
                     atm_d = aa_work_mol.atom(molecules[m][des]['aa'][3]).xyz
                     ang = dihedral_angle(atm_a,atm_b,atm_c,atm_d,scale='deg')
-                    angs_aa.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.001'.format(ang, *molecules[m][des]['aa']))
-                    angs_ua.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.001'.format(ang, *molecules[m][des]['ua']))
+                    angs_aa.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.0001'.format(ang, *molecules[m][des]['aa']))
+                    angs_ua.append('   {1}  {2}  {3}  {4}  1.0  {0:.3f}  0.0   0.0001'.format(ang, *molecules[m][des]['ua']))
                 with open('{outdir}/{mol}.{ang:03}.aa.constraints.dat'.format(**forms), 'w') as fh:
                     fh.write(constraint_temp.format(**{'constraints':'\n'.join(angs_aa)}))
                 with open('{outdir}/{mol}.{ang:03}.ua.constraints.dat'.format(**forms), 'w') as fh:
@@ -817,6 +817,7 @@ def run_md_jobs(root, mols, descrips):
                 
 
 def main():
+    import align_structures
     root = os.path.expanduser('~') + '/GitHub/ExtractedData/Torsions/AdditionalFixedTorsions'
     
     descriptors = ['Original', 'FunctionalFixed', 
@@ -859,6 +860,7 @@ def main():
     
     #generate_new_qm_jobs(root, ['METH-1'], ['Original'])
     run_md_jobs(root, qm_mols, ['Original'])
+    #run_md_jobs(root, ['AMINO1'], ['Original'])
     md_mols = [x for x in mols if 'aa' in mols[x] and 'ua' in mols[x]]
     #md_mols = ['AMINO0']
     md_angles = [mols[x] for x in md_mols]
@@ -867,6 +869,7 @@ def main():
     #extract_energies_md(root, descriptors, md_mols, md_angles)
     #process_data(root, ['Original'], ['AMINO1', 'CHLORO1', 'HYDRO1', 'METH1', 'THIO1'])
     process_data(root, ['Original'], all_mols)
+    #align_structures.main()
     #process_data(root, ['Original'], ['AMINO1'])
     #process_data(root, descriptors, all_mols)
     

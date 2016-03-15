@@ -37,14 +37,8 @@ def dihedral_angle(a, b, c, d, period=[0,2*np.pi], scale='rad'):
             phi -= 360
     return float(phi)
 
-def aligned_rmsd(coordinates_A, coordinates_B):
-    def dict_to_array(coordinates):
-        A = []
-        for atm in sorted(coordinates):
-            A.append(np.asarray(coordinates[atm]['vec']))
-        return np.asarray(A)
-    
-    def kabsch_alignment(A, B):
+def kabsch_alignment(A, B, method=2):
+    if method == 1:      # I think is wrong. Doesn;t line things up as nice as I would hope/expect
         covariance = np.dot(np.transpose(A), B)
         U, S, V = np.linalg.svd(covariance)
         # correct for right-handed coordinate system
@@ -54,6 +48,23 @@ def aligned_rmsd(coordinates_A, coordinates_B):
         # calc the rotation matrix
         rot_mat = np.dot(U,V)
         return rot_mat
+    elif method == 2:
+        covariance = np.dot(np.transpose(A), B)
+        V, S, W_transpose = np.linalg.svd(covariance)
+        d = np.sign(np.linalg.det(np.dot(np.transpose(W_transpose),np.transpose(V))))
+        I = np.identity(3)
+        I[2,2] = d
+        U = np.dot(np.transpose(W_transpose), I)
+        rot_mat = np.dot(U, np.transpose(V))
+        return rot_mat
+    
+def dict_to_array(coordinates):
+    A = []
+    for atm in sorted(coordinates):
+        A.append(np.asarray(coordinates[atm]['vec']))
+    return np.asarray(A)
+    
+def aligned_rmsd(coordinates_A, coordinates_B):  
     # convert dict input to a matrix type thingy
     mat_A = dict_to_array(coordinates_A)
     mat_B = dict_to_array(coordinates_B)
